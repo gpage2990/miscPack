@@ -1,0 +1,10 @@
+useDynLib(miscPack, .registration = TRUE)
+
+export(gaussian_mixture)
+export(ppmx.missing)
+export(dp_mixture)
+export(informed_mixture)
+export(pspline_mixture)
+
+
+importFrom("stats", "sd")
