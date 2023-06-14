@@ -880,10 +880,10 @@ int compatibility(int *rho1, int *rho2, int n){
  * 		0 - not compatible
  * 		1 - compatible
  *******************************************************************************/
-	int i, nc1, nc2, comp=1, scr1[n], scr2[n], scr3[n], scr4[n];
-
-	nc1 = unique_elements(rho1, n);
-	nc2 = unique_elements(rho2, n);
+	int i, comp=1, scr1[n], scr2[n], scr3[n], scr4[n];
+    //int nc1, nc2;
+	//nc1 = unique_elements(rho1, n);
+	//nc2 = unique_elements(rho2, n);
 
 //	Rprintf("nc1 = %d\n", nc1);
 //	Rprintf("nc2 = %d\n", nc2);
@@ -996,9 +996,9 @@ double gsimconNN(double m0, double v2, double s20, double sumx, double sumx2, do
 //	Rprintf("n = %d\n", n);
 
 	double mus, muss, s2s, s2ss;
-	double ld1, ld2, ld3, ld4, ld5, ld6;
+	double ld1, ld2, ld3, ld4, ld5;
 	double out;
-	double out1, out2;
+	//double out1, out2, ld6;
 
 	s2s = 1/((n/v2) + (1/s20));
 	mus = s2s*((1/v2)*sumx + (1/s20)*m0);
@@ -1018,7 +1018,7 @@ double gsimconNN(double m0, double v2, double s20, double sumx, double sumx2, do
 	ld4 = dnorm(muss, 0, sqrt(s2ss),1);
 
 	ld5 = dnorm(mle, m0, sqrt(s20),1);
-	ld6 = dnorm(mle, mus, sqrt(s2s),1);
+//	ld6 = dnorm(mle, mus, sqrt(s2s),1);
 //	Rprintf("ld1 = %f\n", ld1);
 //	Rprintf("ld2 = %f\n", ld2);
 //	Rprintf("ld3 = %f\n", ld3);
@@ -1026,8 +1026,8 @@ double gsimconNN(double m0, double v2, double s20, double sumx, double sumx2, do
 
 
 	out = ld1 + ld2 - ld3;
-	out1 = ld1 + ld3 - ld4;
-	out2 = ld5 - ld6;
+//	out1 = ld1 + ld3 - ld4;
+//	out2 = ld5 - ld6;
 //	Rprintf("out = %f\n", out);
 //	Rprintf("out1 = %f\n", out1);
 	if(DD==1) out = ld1 + ld3 - ld4;

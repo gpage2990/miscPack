@@ -369,7 +369,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 
 
-    if(hierarchy==1){
+    if(*hierarchy==1){
 
       // 6) update mu0
       summu = 0.0;
@@ -549,6 +549,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
         }
       }
     }
+
 
 
     // This code is for the centered prior on K+
