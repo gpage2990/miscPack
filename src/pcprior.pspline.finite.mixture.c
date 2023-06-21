@@ -80,6 +80,7 @@ static void pspline_ifmm_gibbs(double *y,
                                double *alpha2_density, 
                                int *ndens_alpha2,                               
                                double *A, 
+                               double *Akap, 
                                double *e_tau, 
                                double *e_omega, 
                                double *a_gam, 
@@ -92,6 +93,7 @@ static void pspline_ifmm_gibbs(double *y,
                                int *nburn, 
                                int *nthin,
                                double *beta, 
+                               double *beta0, 
                                double *sigma2, 
                                double *theta, 
                                double *lambda2,
@@ -108,17 +110,20 @@ static void pspline_ifmm_gibbs(double *y,
   Rprintf("n = %d\n", *n);
   Rprintf("K = %d\n", *K);
   Rprintf("nobs = %d\n", *nobs);
+//  RprintVecAsMat("S", S, *nb, *nb);
+  Rprintf("A = %f\n", *A);
+  Rprintf("Akap = %f\n", *Akap);
   
   if(*alpha_prior_type==2) Rprintf("U=%d\n", *U);
   int i, j, k, d, s, ss, t, ii, jj, nk, csobs;
   int nout = (*niter - *nburn)/(*nthin);
   double alphastar[*K], astar, bstar;
   
-  double _beta[(*n)*(*nb)], _sigma2[*n];
+  double _beta[(*n)*(*nb)], _sigma2[*n], _beta0[*n];
   double _theta[(*K)*(*nb)],  _w[*K], _tau2[*K], _lambda2[*K]; 
   double _alpha, _alpha1, _alpha2;
-  double theta_tmp[(*K)*(*nb)], lambda2_tmp[*K], w_tmp[*K];
-  int _z[*n], nk_vec2[*K], z_tmp[*n];
+  double theta_tmp[(*K)*(*nb)], lambda2_tmp[*K], w_tmp[*K], tau2_tmp[*K];
+  int _z[*n], nk_vec2[*K], z_tmp[*n], alpha_loc[*K], alpha_loc_tmp[*K];
  
   int *nk_vecOrd = (int *) R_alloc(*K, sizeof(int));
   SEXP nk_vec = PROTECT(Rf_allocVector(REALSXP, *K));
@@ -130,38 +135,53 @@ static void pspline_ifmm_gibbs(double *y,
   _alpha2 = *alpha2_val;
 
   for(k = 0; k < *K; k++){ 
+    nk_vec2[k] = 0;
   
     _tau2[k] = rgamma(1,1);
+    tau2_tmp[k] = _tau2[k];
     
-    _w[k] = 1/(*K);
+    _w[k] = 1.0/(*K);
     w_tmp[k] = _w[k];
     
-    _lambda2[k] = 0.5;
+    _lambda2[k] = (0.5*(*Akap))*(0.5*(*Akap));
     lambda2_tmp[k] = _lambda2[k];
     
     for(s = 0; s < *nb; s++){
       _theta[k*(*nb)+s] = rnorm(0,1);
       theta_tmp[k*(*nb)+s] = _theta[k*(*nb)+s];
     }
+    
+    if(*alpha_prior_type == 2){//asymmetric dirichlet
+      if(k<(*U)){
+        alpha_loc[k] = 1;
+        alpha_loc_tmp[k] = 1;
+      }
+      if(k>=(*U)){
+        alpha_loc[k] = 2;
+        alpha_loc_tmp[k] = 2;
+      }
+    }
   }
   for(j = 0; j < *n; j++){
+    _beta0[j] = 0.0;
     _z[j] = rbinom(*K, 0.25);
+    z_tmp[j] = _z[j];
     _sigma2[j] = (0.5*(*A))*(0.5*(*A));
     for(s = 0; s < *nb; s++){
-      _beta[j*(*nb)+s] = rnorm(0,1);
+      _beta[j*(*nb)+s] = _theta[(_z[j]-1)*(*nb)+s];
     }
   }
 
-
+  
 //  RprintVecAsMat("S", S, *nb, *nb);
                    
   // Since I update w first in the MCMC algorithm,
   // I don't need to initialize it
   
   // scratch vectors to update parameters
-  double sumdens, cprob, ssq=0.0, xb=0.0, ld;
+  double sumdens, cprob, ssq=0.0, xb=0.0, ld, sumy_Xb;
   //double astar, bstar;
-  double max_dens;
+  double max_dens, mstar, s2star;
   double p0, an, ao, ln, lo, to, tn, os, ns; 
   double log_ao_density, log_an_density, llo,lln,llr,uu;
   double dens[*K], ao_vec[*K], an_vec[*K], scr1[*K], scr2[*nb], scr3[*nb];
@@ -174,6 +194,7 @@ static void pspline_ifmm_gibbs(double *y,
   double *XtX = R_Vector(((*nb)*(*nb)));
   double *Xy = R_Vector((*nb));
   double *Xb = R_Vector(*nobs);
+  double *y_b0 = R_Vector(*nobs);
   double *outrmvnorm = R_Vector((*nb));
   
   
@@ -192,52 +213,28 @@ static void pspline_ifmm_gibbs(double *y,
       break;
     }
   }
-
+//  Rprintf("log_ao_density = %f\n", log_ao_density);
   // Metropolis tunning parameter
-  double csiga = 0.5, csigl=0.5, csigt=0.5, csigs=0.0001;
+  double csiga = 0.5, csigl=0.1, csigt=0.05, csigs=0.01;
+  
+  double mb0 = 0.0, s2b0 = 100*100;
 
   ii = 0;
 
 
 
   for(i=0; i<*niter; i++){
-    if((i+1) % 10000 == 0){
+    if((i+1) % 1000 == 0){
       Rprintf("i =========================================== %d\n", i+1);
     }
 
-    // 1) update w
-    for(k=0; k<*K; k++){
-      if(*alpha_prior_type == 1){//symmetric dirichlet
-        alphastar[k] = _alpha;
-      }
-      if(*alpha_prior_type == 2){//asymmetric dirichlet
-        if(k<(*U)){
-          alphastar[k] = _alpha1;
-        }
-        if(k>=(*U)){
-          alphastar[k] = _alpha2;
-        }
-      }
-//      Rprintf("alphastar = %f\n", alphastar[k]);
-      for(j=0; j<*n; j++){
-        if(_z[j] == (k+1)){
-          alphastar[k] = alphastar[k] + 1;
-        }
-      }
-    }
 
-    ran_dirich(alphastar, *K, scr1, _w);
-//    RprintVecAsMat("_w", _w, 1, *K);
     for(k=0; k<*K; k++){
-      if(_w[k] < 1e-323) _w[k] = 1e-323;
       REAL(nk_vec)[k] = 0.0;
       nk_vec2[k]=0;
-      w_tmp[k] = _w[k];
     }
-//  RprintVecAsMat("_w", _w, 1, *K);
-  
 
-    // 2) update zi - component labels
+    // 1) update zi - component labels
 	csobs=0;
     for(j=0; j<*n; j++){
       
@@ -249,7 +246,6 @@ static void pspline_ifmm_gibbs(double *y,
 	    }
         dens[k] = dens[k] + log(_w[k]);
       }
-      
       max_dens = dens[0];
       for(k=1; k<*K; k++){
         if(max_dens < dens[k]) max_dens = dens[k];
@@ -264,6 +260,7 @@ static void pspline_ifmm_gibbs(double *y,
       for(k=0; k<*K; k++){
         scr1[k] = dens[k]/sumdens;
       }
+//      RprintVecAsMat("probh", scr1, 1, *K);
 
 //      if(j == 0){
 //        Rprintf("j = %d\n", j);
@@ -275,35 +272,389 @@ static void pspline_ifmm_gibbs(double *y,
 	    cprob = cprob + scr1[k];
 		if (uu < cprob){
 		  _z[j] = k+1;
+		  z_tmp[j] = k+1;
+		  REAL(nk_vec)[k] = REAL(nk_vec)[k] + 1.0;
+		  nk_vec2[k] = nk_vec2[k] + 1;
 		  break;
 		}
 	  }
     }
 //    RprintIVecAsMat("_z", _z, 1, *n);
-   
+//    RprintIVecAsMat("nk_vec", nk_vec, 1, *K);
+//    RprintIVecAsMat("nk_vec2", nk_vec2, 1, *K);
 
     if(*alpha_prior_type==2){ // centered prior need to reorder based on cluster size
       R_orderVector(nk_vecOrd, *K, Rf_lang1(nk_vec), TRUE, TRUE);
+//      RprintIVecAsMat("nk_vecOrd", nk_vecOrd, 1, *K);
       for(k=0; k<*K; k++){
 
         for(j=0; j<*n; j++){
           if(z_tmp[j] == (nk_vecOrd[k]+1)) _z[j] = k+1;
         }
         _lambda2[k] = lambda2_tmp[nk_vecOrd[k]];
+		_tau2[k] = tau2_tmp[nk_vecOrd[k]];
         _w[k] = w_tmp[nk_vecOrd[k]];
-
+        alpha_loc[k] = alpha_loc_tmp[nk_vecOrd[k]];
 	    for(s = 0; s < *nb; s++){
 	      _theta[k*(*nb)+s] = theta_tmp[nk_vecOrd[k]*(*nb)+s];
 	    }
       }
 //      rsort_with_index()
     }
+//    RprintVecAsMat("nk_vec", nk_vec, 1, *K);
+//    RprintIVecAsMat("nk_vec2", nk_vec2, 1, *K);
+//    RprintIVecAsMat("z_tmp", z_tmp, 1, *n);
+//    RprintIVecAsMat("z", _z, 1, *n);
+//    RprintVecAsMat("lambda2_tmp", lambda2_tmp, 1, *K);
+//    RprintVecAsMat("_lambda2", _lambda2, 1, *K);
+//    RprintVecAsMat("w_tmp", w_tmp, 1, *K);
+//    RprintVecAsMat("_w", _w, 1, *K);
+//    RprintIVecAsMat("alpha_loc_tmp", alpha_loc_tmp, 1, *K);
+//    RprintIVecAsMat("alpha_loc", alpha_loc, 1, *K);
+//    RprintVecAsMat("tau2_tmp", tau2_tmp, 1, *K);
+//    RprintVecAsMat("_tau2", _tau2, 1, *K);
+//    RprintVecAsMat("theta_tmp", theta_tmp, *K, *nb);
+//    RprintVecAsMat("theta", _theta,  *K, *nb);
 
 
 
 
-    // 3) update alpha
-    // This code is for the sparse model for K+
+    // 2) update w
+    for(k=0; k<*K; k++){
+      if(*alpha_prior_type == 1){//symmetric dirichlet
+        alphastar[k] = _alpha;
+      }
+      if(*alpha_prior_type == 2){//asymmetric dirichlet
+        if(alpha_loc[k] == 1){
+          alphastar[k] = _alpha1;
+        }
+        if(alpha_loc[k] == 2){
+          alphastar[k] = _alpha2;
+        }
+//        alphastar[k] = alpha_vec[k];
+      }
+//      Rprintf("alphastar = %f\n", alphastar[k]);
+      for(j=0; j<*n; j++){
+        if(_z[j] == (k+1)){
+          alphastar[k] = alphastar[k] + 1;
+        }
+      }
+    }
+//    Rprintf("alpha1 = %f\n", _alpha1);
+//    RprintVecAsMat("alphastar", alphastar, 1, *K);
+    ran_dirich(alphastar, *K, scr1, _w);
+
+    for(k=0; k<*K; k++){
+      if(_w[k] < 1e-323) _w[k] = 1e-323;
+      w_tmp[k] = _w[k];
+      alpha_loc_tmp[k] = alpha_loc[k];
+    }
+//  RprintVecAsMat("_w", _w, 1, *K);
+  
+  
+//    Rprintf("alpha = %f\n", _alpha);
+
+
+    // 4) update beta, sigma2, beta0 within same loop
+	csobs=0;
+    for(j=0; j<*n; j++){
+
+//      Rprintf("j = %d\n", j);
+      
+      
+      // 4a) update beta
+	  for(t=0; t<*nobs; t++){
+	    y_tmp[t] = y[csobs+t];
+	    y_b0[t] = y_tmp[t] - _beta0[j];
+
+	  } 
+      csobs = csobs + (*nobs);
+      
+      matrix_product(tX, y_b0, Xy, *nb, 1, *nobs);
+	  
+	  for(s = 0; s < (*nb); s++){
+
+	    sumXy[s] = (1.0/_sigma2[j])*Xy[s] + 
+	              (1.0/_lambda2[(_z[j]-1)])*_theta[(_z[j]-1)*(*nb)+s];
+
+	    for(ss = 0; ss < (*nb); ss++){
+		  Sstar[s*(*nb)+ss] = (1.0/_sigma2[j])*XtX[s*(*nb)+ss];
+
+		  if(s == ss){
+		    Sstar[s*(*nb)+ss] = (1.0/_sigma2[j])*XtX[s*(*nb)+ss]+
+		                        (1.0/_lambda2[(_z[j]-1)]);
+		  }
+		}
+	  }
+
+//      RprintVecAsMat("sumXy", sumXy, 1, *nb);
+      
+	  cholesky(Sstar, (*nb), &ld);
+	  inverse_from_cholesky(Sstar, scr2, scr3, (*nb));
+//      RprintVecAsMat("Sstar", Sstar, *nb, *nb);
+
+    
+//      RprintVecAsMat("Xy", Xy, 1, *nb);
+
+	  matrix_product(Sstar, sumXy, Mstar, (*nb), 1, (*nb));
+
+//      RprintVecAsMat("Mstar", Mstar, 1, *nb);
+
+
+	  cholesky(Sstar, (*nb) , &ld);
+
+
+	  ran_mvnorm(Mstar, Sstar, (*nb), scr2, outrmvnorm);
+
+//      RprintVecAsMat("beta", outrmvnorm, 1, *nb);
+
+	  for(s=0; s < (*nb); s++){
+	    _beta[j*(*nb) + s] = outrmvnorm[s];
+	  }
+
+      matrix_product(Xmat, outrmvnorm, Xb, *nobs, 1, (*nb));
+	  
+//	  RprintVecAsMat("Xb", Xb, 1, *nobs);
+	  
+      sumy_Xb = 0.0;
+      for(t = 0; t < *nobs; t++){
+        sumy_Xb = sumy_Xb + (y_tmp[t] - Xb[t]);
+      }
+
+//      Rprintf("sumy_Xb = %f\n", sumy_Xb);
+
+
+      // 4b) update sigma2
+      os = sqrt(_sigma2[j]);
+      ns = rnorm(os, csigs);
+      if(ns > 0){
+        llo = 0; lln = 0;
+        for(t = 0; t <*nobs; t++){
+//          llo = llo + dnorm(y_tmp[t], Xb[t], os, 1);
+//          lln = lln + dnorm(y_tmp[t], Xb[t], ns, 1);
+          llo = llo + dnorm(y_b0[t], Xb[t], os, 1);
+          lln = lln + dnorm(y_b0[t], Xb[t], ns, 1);
+        }
+        llo = llo + dunif(os, 0.0, *A, 1);
+        lln = lln + dunif(ns, 0.0, *A, 1);
+        
+        llr = lln - llo;
+        uu = runif(0,1);
+        if(llr > log(uu)) _sigma2[j] = ns*ns;
+      }
+
+/*
+      ssq=0.0;
+      for(t = 0; t < *nobs; t++){
+      	ssq = ssq + (y_b0[t] - Xb[t])*(y_b0[t] - Xb[t]);
+      }
+            
+      astar = 0.5*(*nobs) + 3.0;
+      bstar = 0.5*ssq + 2.0;
+      
+      //bstar is rate and rgamma requires scale hence inverse
+      
+     _sigma2[j] = 1/rgamma(astar, 1/bstar);
+*/      
+//      Rprintf("sigma2 = %f\n", _sigma2[j]);
+
+
+      // 4c) update beta0
+      s2star = 1.0/((*nobs/_sigma2[j]) + (1/s2b0));
+      mstar = s2star*((1/_sigma2[j])*sumy_Xb + (1/s2b0)*mb0);
+
+      _beta0[j] = rnorm(mstar, sqrt(s2star));
+
+	  
+    }
+
+
+
+//    // 5) update sigma2    
+//    for(k=0; k<*K; k++){
+//      ssq=0.0, nk=0, csobs=0;
+//      for(j=0; j<*n; j++){
+//        if(_z[j] == (k+1)){
+//          for(t = 0; t<*nobs; t++){
+//      	    xb = 0.0;
+//	        for(s = 0; s < *nb; s++){
+//	          xb = xb + _beta[k*(*nb)+s]*Xmat[t*(*nb)+s];
+//	        }
+//            ssq = ssq + (y[csobs+t]-xb)*(y[csobs+t]-xb);
+//            nk = nk + 1;
+//          }
+//        }
+//        csobs = csobs + (*nobs);
+//      }
+//      astar = 0.5*(*nobs)*(nk) + *a;
+//      bstar = 0.5*ssq + *b;
+//            
+//      _sigma2[k] = 1/rgamma(astar, 1/bstar);
+////      _sigma2[k] = 0.1*0.1;
+//    }
+
+    
+    
+    // 6) update theta and lambda in the same for-loop
+    for(k = 0; k < *K; k++){
+//      Rprintf("k = %d\n", k);
+
+
+      // 6a) update theta    
+      
+      // I need to zero out the sumb vector
+      for(s=0; s<(*nb); s++) sumb[s] = 0.0;
+      
+      
+      nk = 0; // need to initialize the cluster size counter
+      for(j=0; j<*n; j++){
+        if(_z[j] == k+1){
+          for(s=0; s<(*nb); s++){
+            sumb[s] = sumb[s] + 
+      	               (1.0/_lambda2[k])*_beta[j*(*nb)+s];
+          }
+          nk = nk + 1;
+        }
+      }
+      
+//      RprintVecAsMat("sumb", sumb, 1, *nb);
+//      Rprintf("nk = %d\n", nk);
+//      Rprintf("_tau2[k] = %f\n", _tau2[k]);
+
+      for(s = 0; s < (*nb); s++){
+        for(ss = 0; ss < (*nb); ss++){
+    	  Sstar[s*(*nb)+ss] = (1/_tau2[k])*S[s*(*nb)+ss];
+    	  if(s == ss){ 
+    	    Sstar[s*(*nb)+ss] = ((double) nk/(_lambda2[k])) +
+    	 							  (1/_tau2[k])*S[s*(*nb)+ss];
+    	  }
+    	}
+      }
+      
+      
+      
+      cholesky(Sstar, (*nb), &ld);
+      inverse_from_cholesky(Sstar, scr2, scr3, (*nb));
+    
+//      RprintVecAsMat("sumb", sumb, 1, *nb);
+      matrix_product(Sstar, sumb, Mstar, (*nb), 1, (*nb));
+      
+//      RprintVecAsMat("Mstar", Mstar, 1, *nb);
+    
+      cholesky(Sstar, (*nb) , &ld);
+    
+      ran_mvnorm(Mstar, Sstar, (*nb), scr2, outrmvnorm);
+      
+//      RprintVecAsMat("theta", outrmvnorm, 1, *nb);
+    
+      for(s=0; s<(*nb); s++){
+        _theta[k*(*nb)+s] = outrmvnorm[s];
+        theta_tmp[k*(*nb)+s] = _theta[k*(*nb)+s];
+      }
+
+
+
+
+      // 6b) update lambda2
+      lo = sqrt(_lambda2[k]);
+      ln = rnorm(lo,csigl);
+
+//      lo = _lambda2[k];
+//      ln = rnorm(lo,csigl);
+          
+      if(ln > 0){
+        llo=0.0, lln=0.0, nk=0;
+        for(j=0; j<*n; j++){
+          if(_z[j] == k+1){
+            for(s=0; s < (*nb); s++){
+//              llo = llo + dnorm(_beta[j*(*nb)+s], _theta[k*(*nb)+s], sqrt(lo), 1);
+//              lln = lln + dnorm(_beta[j*(*nb)+s], _theta[k*(*nb)+s], sqrt(ln), 1);
+              llo = llo + dnorm(_beta[j*(*nb)+s], _theta[k*(*nb)+s], lo, 1);
+              lln = lln + dnorm(_beta[j*(*nb)+s], _theta[k*(*nb)+s], ln, 1);
+            }
+            nk = nk + 1;
+          }
+        }
+
+
+//        Rprintf("nk = %d\n", nk);
+    	llo = llo + dunif(lo, 0.0, *Akap, 1);
+    	lln = lln + dunif(ln, 0.0, *Akap, 1);
+
+        // Note, this gumbel is parametrized for precision
+//        llo = llo + log(0.5*(*e_omega)) - 1.5*log(1.0/lo) - (*e_omega)*sqrt(lo);
+//        lln = lln + log(0.5*(*e_omega)) - 1.5*log(1.0/ln) - (*e_omega)*sqrt(ln);
+    
+        
+    	llr = lln - llo;
+    	uu = runif(0.0,1.0);
+        
+        
+//    	if(log(uu) < llr) _lambda2[k] = ln;
+    	if(log(uu) < llr) _lambda2[k] = ln*ln;
+    	
+      }
+//      _lambda2[k] = 0.01;
+      lambda2_tmp[k] = _lambda2[k];
+      
+//      Rprintf("nk = %d\n", nk);
+
+    
+      // 6c) update tau2 using a PC prior    
+      to = _tau2[k];
+      tn = rnorm(to, csigt);
+      if(tn > 0){
+
+        for(s=0; s<*nb; s++){
+          scr2[s] = _theta[k*(*nb) + s];
+        }
+	    ssq = quform(scr2,S,(*nb));
+	    
+//        Rprintf("ssq = %f\n", ssq);
+
+        llo =  -0.5*(*nb)*log(to) - (0.5/to)*ssq;
+        lln =  -0.5*(*nb)*log(tn) - (0.5/tn)*ssq;
+
+        // Note, this gumbel is parametrized for precision
+        llo = llo + log(0.5*(*e_tau)) - 1.5*log(1.0/to) - (*e_tau)*sqrt(to);
+        lln = lln + log(0.5*(*e_tau)) - 1.5*log(1.0/tn) - (*e_tau)*sqrt(tn);
+
+
+    	llr = lln - llo;
+    	uu = runif(0.0,1.0);
+
+    	if(log(uu) < llr) _tau2[k] = tn;
+      }
+//      _tau2[k] = 0.001;
+      tau2_tmp[k] = _tau2[k];
+    }
+
+
+//\theta/2 tau^{-3/2}exp(-theta/sqrt(tau))
+
+    
+//    // 7) update tau2 (smoothing parameter)    
+//    ssq = 0.0;
+//    for(k=0; k<*K; k++){
+//      for(s=0; s<*nb; s++){
+//        scr2[s] = _theta[k*(*nb) + s];
+//      }
+//	  ssq = quform(scr2,S,(*nb));
+//
+//      astar = 0.5*(*nb) + *a;
+//      bstar = 0.5*ssq + *b;
+//    
+//      _tau2[k] = 1.0/rgamma(astar, 1.0/bstar);
+//    }
+//    RprintVecAsMat("tau2", _tau2, 1, *K);
+
+
+
+
+ 
+
+    // 7) update alpha
+    // This code is for the sparse model for K+ symmetric dirichlet
     if(*alpha_prior_type==1){ // sparse model
 
       // pc prior rather than gamma
@@ -440,7 +791,7 @@ static void pspline_ifmm_gibbs(double *y,
     }
 
 
-    // This code is for the centered prior on K+
+    // This code is for the centered prior on K+ asymmetric dirichlet
     if(*alpha_prior_type==2){ // centered prior on K+
 
       // update a1
@@ -465,20 +816,27 @@ static void pspline_ifmm_gibbs(double *y,
             }
 
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
               }
-              if(k>=(*U)){
+              if(alpha_loc[k]==2){
                 ao_vec[k] = _alpha2;
                 an_vec[k] = _alpha2;
               }
             }
+//            RprintVecAsMat("ao_vec", ao_vec, 1, *K);
+//            RprintVecAsMat("an_vec", an_vec, 1, *K);
 
             llo = ddirich(_w, ao_vec, *K, 1) + log(log_ao_density);
             lln = ddirich(_w, an_vec, *K, 1) + log(log_an_density);
-//          Rprintf("llo = %f\n", llo);
-//          Rprintf("lln = %f\n", lln);
+            
+//            Rprintf("ddirich(_w, ao_vec, *K, 1) = %f\n", ddirich(_w, ao_vec, *K, 1));
+//            Rprintf("ddirich(_w, an_vec, *K, 1) = %f\n", ddirich(_w, an_vec, *K, 1));
+//            Rprintf("log(log_ao_density) = %f\n", log(log_ao_density));
+//            Rprintf("log(log_an_density) = %f\n", log(log_an_density));
+//            Rprintf("llo = %f\n", llo);
+//            Rprintf("lln = %f\n", lln);
 
 
 
@@ -491,7 +849,9 @@ static void pspline_ifmm_gibbs(double *y,
               log_ao_density = log_an_density;
             }
           }
-
+//          Rprintf("ao = %f\n", ao);
+//          Rprintf("an = %f\n", an);
+//          Rprintf("_alpha1 = %f\n", _alpha1);
         }
 
         if(*alpha_prior_dist == 2){ // gamma prior
@@ -499,11 +859,11 @@ static void pspline_ifmm_gibbs(double *y,
           an = rnorm(ao, csiga);
           if(an > 0){
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
               }
-              if(k>=(*U)){
+              if(alpha_loc[k]==2){
                 ao_vec[k] = _alpha2;
                 an_vec[k] = _alpha2;
               }
@@ -544,13 +904,13 @@ static void pspline_ifmm_gibbs(double *y,
             }
 
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
+                ao_vec[k] = _alpha1;
+                an_vec[k] = _alpha1;
+              }
+              if(alpha_loc[k]==2){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
-              }
-              if(k>=(*U)){
-                ao_vec[k] = _alpha2;
-                an_vec[k] = _alpha2;
               }
             }
 
@@ -579,13 +939,13 @@ static void pspline_ifmm_gibbs(double *y,
           an = rnorm(ao, (1e-3*csiga));
           if(an > 0){
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
+                ao_vec[k] = _alpha1;
+                an_vec[k] = _alpha1;
+              }
+              if(alpha_loc[k]==2){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
-              }
-              if(k>=(*U)){
-                ao_vec[k] = _alpha2;
-                an_vec[k] = _alpha2;
               }
             }
 //            RprintVecAsMat("an_vec", an_vec, 1, *K);
@@ -608,259 +968,8 @@ static void pspline_ifmm_gibbs(double *y,
 
     }
     
-    
-//    Rprintf("alpha = %f\n", _alpha);
-
-
-    // 4) update beta and sigma2 within same loop
-	csobs=0;
-    for(j=0; j<*n; j++){
-
-//      Rprintf("j = %d\n", j);
-      
-      
-      // 4a) update beta
-	  for(t=0; t<*nobs; t++){
-	    y_tmp[t] = y[csobs+t];
-	  } 
-      csobs = csobs + (*nobs);
-      
-      matrix_product(tX, y_tmp, Xy, *nb, 1, *nobs);
-	  
-	  for(s = 0; s < (*nb); s++){
-
-	    sumXy[s] = (1.0/_sigma2[j])*Xy[s] + 
-	              (1.0/_lambda2[(_z[j]-1)])*_theta[(_z[j]-1)*(*nb)+s];
-
-	    for(ss = 0; ss < (*nb); ss++){
-		  Sstar[s*(*nb)+ss] = (1.0/_sigma2[j])*XtX[s*(*nb)+ss];
-
-		  if(s == ss){
-		    Sstar[s*(*nb)+ss] = (1.0/_sigma2[j])*XtX[s*(*nb)+ss]+
-		                        (1.0/_lambda2[(_z[j]-1)]);
-		  }
-		}
-	  }
-
-
-	  cholesky(Sstar, (*nb), &ld);
-	  inverse_from_cholesky(Sstar, scr2, scr3, (*nb));
-//      RprintVecAsMat("Sstar", Sstar, *nb, *nb);
-
-    
-//      RprintVecAsMat("Xy", Xy, 1, *nb);
-
-	  matrix_product(Sstar, sumXy, Mstar, (*nb), 1, (*nb));
-
-//      RprintVecAsMat("Mstar", Mstar, 1, *nb);
-
-
-	  cholesky(Sstar, (*nb) , &ld);
-
-
-	  ran_mvnorm(Mstar, Sstar, (*nb), scr2, outrmvnorm);
-
-//      RprintVecAsMat("beta", outrmvnorm, 1, *nb);
-
-	  for(s=0; s < (*nb); s++){
-	    _beta[j*(*nb) + s] = outrmvnorm[s];
-	  }
-
-      matrix_product(Xmat, outrmvnorm, Xb, *nobs, 1, (*nb));
-	  
-
-
-
-
-      // 4b) update sigma2
-      os = sqrt(_sigma2[j]);
-      ns = rnorm(os, csigs);
-      if(ns > 0){
-        llo = 0; lln = 0;
-        for(jj = 0; jj <*nobs; jj++){
-          llo = llo + dnorm(y_tmp[jj], Xb[jj], os, 1);
-          lln = lln + dnorm(y_tmp[jj], Xb[jj], ns, 1);
-        }
-        llo = llo + dunif(os, 0.0, *A, 1);
-        lln = lln + dunif(ns, 0.0, *A, 1);
-        
-        llr = lln - llo;
-        uu = runif(0,1);
-        if(llr > log(uu)) _sigma2[j] = ns*ns;
-      }
-
-/*
-      ssq=0.0;
-      for(jj = 0; jj < *nobs; jj++){
-      	ssq = ssq + (y_tmp[jj] - Xb[jj])*(y_tmp[jj] - Xb[jj]);
-      }
-            
-      astar = 0.5*(*nobs) + 3.0;
-      bstar = 0.5*ssq + 2.0;
-      
-      //bstar is rate and rgamma requires scale hence inverse
-      
-     _sigma2[j] = 1/rgamma(astar, 1/bstar);
-*/      
-//      Rprintf("sigma2 = %f\n", _sigma2[j]);
-	  
-    }
-
-
-
-//    // 5) update sigma2    
-//    for(k=0; k<*K; k++){
-//      ssq=0.0, nk=0, csobs=0;
-//      for(j=0; j<*n; j++){
-//        if(_z[j] == (k+1)){
-//          for(t = 0; t<*nobs; t++){
-//      	    xb = 0.0;
-//	        for(s = 0; s < *nb; s++){
-//	          xb = xb + _beta[k*(*nb)+s]*Xmat[t*(*nb)+s];
-//	        }
-//            ssq = ssq + (y[csobs+t]-xb)*(y[csobs+t]-xb);
-//            nk = nk + 1;
-//          }
-//        }
-//        csobs = csobs + (*nobs);
-//      }
-//      astar = 0.5*(*nobs)*(nk) + *a;
-//      bstar = 0.5*ssq + *b;
-//            
-//      _sigma2[k] = 1/rgamma(astar, 1/bstar);
-////      _sigma2[k] = 0.1*0.1;
-//    }
-
-    
-    
-    // 6) update theta and lambda in the same for-loop
-    for(k = 0; k < *K; k++){
-//      Rprintf("k = %d\n", k);
-      // 6a) update lambda2
-//      lo = sqrt(_lambda2[k]);
-//      ln = rnorm(lo,csigl);
-
-      lo = _lambda2[k];
-      ln = rnorm(lo,csigl);
-      
-//      Rprintf("lo = %f\n", lo);
-//      Rprintf("ln = %f\n", ln);
-    
-      if(ln > 0){
-        llo=0.0, lln=0.0, nk=0;
-        for(j=0; j<*n; j++){
-          if(_z[j] == k+1){
-            for(s=0; s < (*nb); s++){
-              llo = llo + dnorm(_beta[j*(*nb)+s], _theta[k*(*nb)+s], sqrt(lo), 1);
-              lln = lln + dnorm(_beta[j*(*nb)+s], _theta[k*(*nb)+s], sqrt(ln), 1);
-            }
-            nk = nk + 1;
-          }
-        }
-    
-//    	llo = llo + dunif(lo, 0.0, *A, 1);
-//    	lln = lln + dunif(ln, 0.0, *A, 1);
-
-        // Note, this gumbel is parametrized for precision
-        llo = llo + log(0.5*(*e_omega)) - 1.5*log(1.0/lo) - (*e_omega)*sqrt(lo);
-        lln = lln + log(0.5*(*e_omega)) - 1.5*log(1.0/ln) - (*e_omega)*sqrt(ln);
-    
-//        Rprintf("llo = %f\n", llo);
-//        Rprintf("lln = %f\n", lln);
-    	llr = lln - llo;
-    	uu = runif(0.0,1.0);
-    
-    	if(log(uu) < llr) _lambda2[k] = ln;
-//    	if(log(uu) < llr) _lambda2[k] = ln;
-    	lambda2_tmp[k] = _lambda2[k];
-      }
-//      Rprintf("lambda2 = %f\n", _lambda2[k]);
-      
-//      Rprintf("nk = %d\n", nk);
-
-      // 6b) update theta    
-      for(s = 0; s < (*nb); s++){
-        for(ss = 0; ss < (*nb); ss++){
-    	  Sstar[s*(*nb)+ss] = (1/_tau2[k])*S[s*(*nb)+ss];
-    	  if(s == ss){ 
-    	    Sstar[s*(*nb)+ss] = ((double) nk/(_lambda2[k])) +
-    	 							  (1/_tau2[k])*S[s*(*nb)+ss];
-    	  }
-    	}
-    	sumb[s] = 0.0;
-      }
-    
-      cholesky(Sstar, (*nb), &ld);
-      inverse_from_cholesky(Sstar, scr2, scr3, (*nb));
-    
-      for(j=0; j<*n; j++){
-        if(_z[j] == k+1){
-          for(s=0; s<(*nb); s++){
-            sumb[s] = sumb[s] + 
-      	               (1.0/_lambda2[k])*_beta[j*(*nb)+s];
-          }
-        }
-      }
-      matrix_product(Sstar, sumb, Mstar, (*nb), 1, (*nb));
-    
-      cholesky(Sstar, (*nb) , &ld);
-    
-      ran_mvnorm(Mstar, Sstar, (*nb), scr2, outrmvnorm);
-      
-//      RprintVecAsMat("theta", outrmvnorm, 1, *nb);
-    
-      for(s=0; s<(*nb); s++){
-        _theta[k*(*nb)+s] = outrmvnorm[s];
-      }
-    }
-    
-    // 7) update tau2 using a PC prior    
-    for(k = 0; k<*K; k++){
-      to = _tau2[k];
-      tn = rnorm(to, csigt);
-      if(tn > 0){
-
-        for(s=0; s<*nb; s++){
-          scr2[s] = _theta[k*(*nb) + s];
-        }
-	    ssq = quform(scr2,S,(*nb));
-	    
-//        Rprintf("ssq = %f\n", ssq);
-
-        llo =  -0.5*(*nb)*log(to) - (0.5/to)*ssq;
-        lln =  -0.5*(*nb)*log(tn) - (0.5/tn)*ssq;
-
-        // Note, this gumbel is parametrized for precision
-        llo = llo + log(0.5*(*e_tau)) - 1.5*log(1.0/to) - (*e_tau)*sqrt(to);
-        lln = lln + log(0.5*(*e_tau)) - 1.5*log(1.0/tn) - (*e_tau)*sqrt(tn);
-
-
-    	llr = lln - llo;
-    	uu = runif(0.0,1.0);
-
-    	if(log(uu) < llr) _tau2[k] = tn;
-      }
-    }
-
-//\theta/2 tau^{-3/2}exp(-theta/sqrt(tau))
-
-    
-//    // 7) update tau2 (smoothing parameter)    
-//    ssq = 0.0;
-//    for(k=0; k<*K; k++){
-//      for(s=0; s<*nb; s++){
-//        scr2[s] = _theta[k*(*nb) + s];
-//      }
-//	  ssq = quform(scr2,S,(*nb));
-//
-//      astar = 0.5*(*nb) + *a;
-//      bstar = 0.5*ssq + *b;
-//    
-//      _tau2[k] = 1.0/rgamma(astar, 1.0/bstar);
-//    }
-//    RprintVecAsMat("tau2", _tau2, 1, *K);
+  
    
- 
 
     // keep iterates
     if((i > (*nburn-1)) & ((i) % *nthin ==0)){
@@ -878,6 +987,7 @@ static void pspline_ifmm_gibbs(double *y,
       ss=0;
       for(j=0; j<*n; j++){
         sigma2[ii + nout*j] = _sigma2[j];
+        beta0[ii + nout*j] = _beta0[j];
         for(s=0; s<*nb; s++){
           beta[ii + nout*ss] = _beta[j*(*nb)+s];
           ss = ss+1;
@@ -892,7 +1002,7 @@ static void pspline_ifmm_gibbs(double *y,
 	      for(s = 0; s < *nb; s++){
 	        xb = xb + _beta[j*(*nb)+s]*Xmat[t*(*nb)+s];	        
 	      }
-	      line_fit[ii + nout*ss] = xb;
+	      line_fit[ii + nout*ss] = _beta0[j] + xb;
 	      ss = ss+1;
         }
       }
@@ -928,7 +1038,7 @@ SEXP PSPLINE_IFMM_GIBBS(SEXP y, SEXP Xmat, SEXP n, SEXP nobs,            //4
                 SEXP alpha_grid, SEXP alpha_density, SEXP ndens_alpha,   //3
                 SEXP alpha1_grid, SEXP alpha1_density, SEXP ndens_alpha1,//3
                 SEXP alpha2_grid, SEXP alpha2_density, SEXP ndens_alpha2,//3
-                SEXP A, SEXP e_tau, SEXP e_omega, 						 //3
+                SEXP A, SEXP Akap, SEXP e_tau, SEXP e_omega, 			 //4
                 SEXP a_gam, SEXP b_gam,									 //2
                 SEXP a1_gam, SEXP b1_gam, 								 //2	
                 SEXP a2_gam, SEXP b2_gam, 								 //2
@@ -956,6 +1066,7 @@ SEXP PSPLINE_IFMM_GIBBS(SEXP y, SEXP Xmat, SEXP n, SEXP nobs,            //4
   double _alpha1_val = asReal(alpha1_val);
   double _alpha2_val = asReal(alpha2_val);
   double _A = asReal(A);
+  double _Akap = asReal(Akap);
   double _e_tau = asReal(e_tau);
   double _e_omega = asReal(e_omega);
   double _a_gam = asReal(a_gam);
@@ -978,6 +1089,7 @@ SEXP PSPLINE_IFMM_GIBBS(SEXP y, SEXP Xmat, SEXP n, SEXP nobs,            //4
   alpha1_density = PROTECT(coerceVector(alpha1_density, REALSXP)); nprot++;
   alpha2_density = PROTECT(coerceVector(alpha2_density, REALSXP)); nprot++;
   SEXP BETA = PROTECT(allocMatrix(REALSXP, nout, (_n)*(_nb))); nprot++;
+  SEXP BETA0 = PROTECT(allocMatrix(REALSXP, nout, (_n))); nprot++;
   SEXP SIGMA2 = PROTECT(allocMatrix(REALSXP, nout, (_n))); nprot++; 
   SEXP THETA = PROTECT(allocMatrix(REALSXP, nout, (_K)*(_nb))); nprot++;
   SEXP LAMBDA2 = PROTECT(allocMatrix(REALSXP, nout, (_K))); nprot++;
@@ -990,10 +1102,11 @@ SEXP PSPLINE_IFMM_GIBBS(SEXP y, SEXP Xmat, SEXP n, SEXP nobs,            //4
   SEXP LINE_FIT = PROTECT(allocMatrix(REALSXP, nout, (_n)*(_nobs))); nprot++;
 
 
-  double *BETAout, *SIGMA2out, *THETAout, *LAMBDA2out;
+  double *BETAout, *BETA0out, *SIGMA2out, *THETAout, *LAMBDA2out;
   double *Wout, *TAU2out, *ALPHAout,  *ALPHA1out,  *ALPHA2out, *LINE_FITout;
   int *Zout;
   BETAout = REAL(BETA);
+  BETA0out = REAL(BETA0);
   SIGMA2out = REAL(SIGMA2);
   THETAout = REAL(THETA);
   LAMBDA2out = REAL(LAMBDA2);
@@ -1020,45 +1133,47 @@ SEXP PSPLINE_IFMM_GIBBS(SEXP y, SEXP Xmat, SEXP n, SEXP nobs,            //4
                      REAL(alpha_grid), REAL(alpha_density), &_ndens_alpha,
                      REAL(alpha1_grid), REAL(alpha1_density), &_ndens_alpha1,
                      REAL(alpha2_grid), REAL(alpha2_density), &_ndens_alpha2,
-                     &_A, &_e_tau, &_e_omega, 
+                     &_A, &_Akap, &_e_tau, &_e_omega, 
                      &_a_gam, &_b_gam, 
                      &_a1_gam, &_b1_gam, 
                      &_a2_gam, &_b2_gam,
                      &_niter, &_nburn, &_nthin, 
-                     BETAout, SIGMA2out, THETAout, LAMBDA2out, 
+                     BETAout, BETA0out, SIGMA2out, THETAout, LAMBDA2out, 
                      Wout, Zout, ALPHAout, ALPHA1out, ALPHA2out, TAU2out,
                      LINE_FITout);
 
   PutRNGstate();
 
 
-  SEXP ans = PROTECT(allocVector(VECSXP, 11)); nprot++;
+  SEXP ans = PROTECT(allocVector(VECSXP, 12)); nprot++;
   SET_VECTOR_ELT(ans, 0, BETA);
-  SET_VECTOR_ELT(ans, 1, SIGMA2);
-  SET_VECTOR_ELT(ans, 2, THETA);
-  SET_VECTOR_ELT(ans, 3, LAMBDA2);
-  SET_VECTOR_ELT(ans, 4, W);
-  SET_VECTOR_ELT(ans, 5, Z);
-  SET_VECTOR_ELT(ans, 6, ALPHA);
-  SET_VECTOR_ELT(ans, 7, ALPHA1);
-  SET_VECTOR_ELT(ans, 8, ALPHA2);
-  SET_VECTOR_ELT(ans, 9, TAU2);
-  SET_VECTOR_ELT(ans, 10, LINE_FIT);
+  SET_VECTOR_ELT(ans, 1, BETA0);
+  SET_VECTOR_ELT(ans, 2, SIGMA2);
+  SET_VECTOR_ELT(ans, 3, THETA);
+  SET_VECTOR_ELT(ans, 4, LAMBDA2);
+  SET_VECTOR_ELT(ans, 5, W);
+  SET_VECTOR_ELT(ans, 6, Z);
+  SET_VECTOR_ELT(ans, 7, ALPHA);
+  SET_VECTOR_ELT(ans, 8, ALPHA1);
+  SET_VECTOR_ELT(ans, 9, ALPHA2);
+  SET_VECTOR_ELT(ans, 10, TAU2);
+  SET_VECTOR_ELT(ans, 11, LINE_FIT);
 
 
-  SEXP nm = allocVector(STRSXP, 11);
+  SEXP nm = allocVector(STRSXP, 12);
   setAttrib(ans, R_NamesSymbol, nm);
   SET_STRING_ELT(nm, 0, mkChar("beta"));
-  SET_STRING_ELT(nm, 1, mkChar("sigma2"));
-  SET_STRING_ELT(nm, 2, mkChar("theta"));
-  SET_STRING_ELT(nm, 3, mkChar("lambda2"));
-  SET_STRING_ELT(nm, 4, mkChar("w"));
-  SET_STRING_ELT(nm, 5, mkChar("z"));
-  SET_STRING_ELT(nm, 6, mkChar("alpha"));
-  SET_STRING_ELT(nm, 7, mkChar("alpha1"));
-  SET_STRING_ELT(nm, 8, mkChar("alpha2"));
-  SET_STRING_ELT(nm, 9, mkChar("tau2"));
-  SET_STRING_ELT(nm, 10, mkChar("line_fit"));
+  SET_STRING_ELT(nm, 1, mkChar("beta0"));
+  SET_STRING_ELT(nm, 2, mkChar("sigma2"));
+  SET_STRING_ELT(nm, 3, mkChar("theta"));
+  SET_STRING_ELT(nm, 4, mkChar("lambda2"));
+  SET_STRING_ELT(nm, 5, mkChar("w"));
+  SET_STRING_ELT(nm, 6, mkChar("z"));
+  SET_STRING_ELT(nm, 7, mkChar("alpha"));
+  SET_STRING_ELT(nm, 8, mkChar("alpha1"));
+  SET_STRING_ELT(nm, 9, mkChar("alpha2"));
+  SET_STRING_ELT(nm, 10, mkChar("tau2"));
+  SET_STRING_ELT(nm, 11, mkChar("line_fit"));
 
   UNPROTECT(nprot);
   return(ans);

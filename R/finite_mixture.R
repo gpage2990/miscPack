@@ -43,7 +43,7 @@ informed_mixture <- function(y, K=25,
                              basemodel=0,
                              U=4,
                              alpha1_val = 1.0,
-                             alpha2_val = 1e-3,
+                             alpha2_val = 1e-5,
                              update_alpha1=TRUE,
                              update_alpha2=FALSE,
                              m0=0, s20=1, A=10, A0=10,
@@ -119,6 +119,7 @@ informed_mixture <- function(y, K=25,
       ndens_alpha1 <- 1e3
       a1.max <- U-1e-3  # the max value here is U.  We just move below for numerical
       alpha1_grid <- exp(seq(log(1e-5), log(a1.max), length.out = 1e4))
+      alpha_grid <- alpha1_grid
       U.lwr <- U - 1
       mylambda <- miscPack:::lambda_finder_pcprior.asym.a1(U = U,
                                                 U.lwr = U.lwr,
@@ -192,6 +193,8 @@ informed_mixture <- function(y, K=25,
   if(hierarchy=="NO"){run$mu0 <- NULL; run$sigma20 <- NULL}
   run$kp <- apply(run$z,1,function(x)length(unique(x)))
   run$ygrid <- ygrid
+  run$lambda_val <- mylambda
+  run$alpha_grid <- alpha_grid
   run
 }
 
@@ -204,12 +207,13 @@ pspline_mixture <- function(y, t, ids, K,
                             basemodel=0,
                             U=4,
                             alpha1_val = 1.0,
-                            alpha2_val = 1e-3,
+                            alpha2_val = 1e-5,
                             update_alpha1=TRUE,
                             update_alpha2=FALSE,
                             tail.prob=0.9,
                             ndx = 10, q = 3, ndens_y = 1,
-                            A=1, U_tau=1, a_tau=0.1, U_omega=1, a_omega=0.1,
+                            A=1, Akap=1,
+                            U_tau=1, a_tau=0.1, U_omega=1, a_omega=0.1,
                             a_gam=1, b_gam = 1, a1_gam =1, b1_gam=1,
                             a2_gam=1, b2_gam=2,
                             alpha_grid, alpha_density,
@@ -247,9 +251,10 @@ pspline_mixture <- function(y, t, ids, K,
   G <- bbase(tt, ndx = ndx, bdeg = q)
 
   # Smoothing matrix
-  D <- diff(diag(ncol(G)), differences = 1)
+  D <- diff(diag(ncol(G)), differences = 2)
   S <- crossprod(D)
-  S[1,1] <- 2 # to make invertible
+#  S[1,1] <- 2 # to make invertible
+
 
   nb <- ncol(S)
   Xmat <- G
@@ -341,6 +346,10 @@ pspline_mixture <- function(y, t, ids, K,
                                                    alpha2.fixed = 1e-5,
                                                    agrid=alpha1_grid,
                                                    TR=TRUE)
+      # These two are necessary to find the initial
+      # log_ao_density
+      alpha_density <- alpha1_density
+      alpha_grid <- alpha1_grid
 
     }
     if(update_alpha2==TRUE){
@@ -361,10 +370,18 @@ pspline_mixture <- function(y, t, ids, K,
   ndens_alpha1 <- length(alpha1_density)
   ndens_alpha2 <- length(alpha2_density)
 
+
+  print(summary(alpha1_grid))
+  print(summary(alpha1_density))
+
+  geom.mean <- function(x) exp(mean(log(diag(ginv(x)))))
+  gm <- geom.mean(S)
+  S.scaled <- gm*S
+
   nobs <- nobs[1]
   run <- .Call("PSPLINE_IFMM_GIBBS",
           as.double(y), as.double(t(Xmat)), as.integer(n), as.integer(nobs),           #4
-          as.double(t(S)), as.integer(nb), as.integer(K),                              #3
+          as.double(t(S)), as.integer(nb), as.integer(K),                       #3
           as.integer(ifelse(alpha_prior_type=="sparse",1 ,2)),                         #1
           as.integer(ifelse(alpha_prior_dist=="pc",1 ,2)),                             #1
           as.integer(U),                                                               #1
@@ -374,15 +391,17 @@ pspline_mixture <- function(y, t, ids, K,
           as.double(alpha_grid), as.double(alpha_density), as.integer(ndens_alpha),    #3
           as.double(alpha1_grid), as.double(alpha1_density), as.integer(ndens_alpha1), #3
           as.double(alpha2_grid), as.double(alpha2_density), as.integer(ndens_alpha2), #3
-          as.double(A), as.double(e_tau), as.double(e_omega),                          #3
+          as.double(A), as.double(Akap),                                               #2
+          as.double(e_tau), as.double(e_omega),                                        #2
           as.double(a_gam), as.double(b_gam),                                          #2
           as.double(a1_gam), as.double(b1_gam),                                        #2
           as.double(a2_gam), as.double(b2_gam),                                        #2
           as.integer(niter), as.integer(nburn), as.integer(nthin))                     #3
-                                                                                       #36 - total
+                                                                                       #37 - total
 
-  run$nclus <- apply(run$z, 1, function(x)length(unique(x)))
+  run$kp <- apply(run$z, 1, function(x)length(unique(x)))
   run$Xmat <- Xmat
+  run$U <- U
   run
 }
 
@@ -446,6 +465,7 @@ pspline_mixture_old <- function(y, t, ids, K,
 
     }
   }
+
   nobs <- nobs[1]
   run <- .Call("PSPLINE_IFMM_GIBBS",
                as.double(y), as.double(t(Xmat)), as.integer(n), as.integer(nobs),

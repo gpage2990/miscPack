@@ -92,7 +92,8 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
   double _mu[*K], _sigma2[*K], _w[*K], _alpha, _alpha1, _alpha2, _mu0, _sigma20;
   double mu_tmp[*K], sigma2_tmp[*K], w_tmp[*K];
-  int _z[*n], nk_vec2[*K], z_tmp[*n];
+  int _z[*n], nk_vec2[*K], z_tmp[*n], alpha_loc[*K], alpha_loc_tmp[*K];
+  
   int *nk_vecOrd = (int *) R_alloc(*K, sizeof(int));
   SEXP nk_vec = PROTECT(Rf_allocVector(REALSXP, *K));
 
@@ -104,18 +105,34 @@ static void ifmm_gibbs(double* y, int* n, int *K,
   _mu0 = *m0;
   _sigma20 = *s20;
   for(k = 0; k < *K; k++){
+    nk_vec2[k] = 0;
+
     _mu[k] = rnorm(0,1);
-    _sigma2[k] = runif(0, *A);
-    _w[k] = 1/(*K);
     mu_tmp[k] = _mu[k];
+
+    _sigma2[k] = runif(0, *A);
     sigma2_tmp[k] = _sigma2[k];
+
+    _w[k] = 1/(*K);
     w_tmp[k] = _w[k];
   }
 
   for(j = 0; j < *n; j++){
     _z[j] = rbinom(*K, 0.25);
+    z_tmp[j] = _z[j];
   }
 
+    if(*alpha_prior_type == 2){//asymmetric dirichlet
+      if(k<(*U)){
+        alpha_loc[k] = 1;
+        alpha_loc_tmp[k] = 1;
+      }
+      if(k>=(*U)){
+        alpha_loc[k] = 2;
+        alpha_loc_tmp[k] = 2;
+      }
+    }
+  }
 
 
   // Since I update w first in the MCMC algorithm,
@@ -170,43 +187,13 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 //    Rprintf("i =========================================== %d\n", i);
 
-
-    // 1) update w
     for(k=0; k<*K; k++){
-      if(*alpha_prior_type == 1){//symmetric dirichlet
-        alphastar[k] = _alpha;
-      }
-      if(*alpha_prior_type == 2){//asymmetric dirichlet
-        if(k<(*U)){
-          alphastar[k] = _alpha1;
-        }
-        if(k>=(*U)){
-          alphastar[k] = _alpha2;
-        }
-      }
-//      Rprintf("alphastar = %f\n", alphastar[k]);
-      for(j=0; j<*n; j++){
-        if(_z[j] == (k+1)){
-          alphastar[k] = alphastar[k] + 1;
-        }
-      }
-    }
-
-    ran_dirich(alphastar, *K, scr1, _w);
-//    RprintVecAsMat("_w", _w, 1, *K);
-    for(k=0; k<*K; k++){
-      if(_w[k] < 1e-323) _w[k] = 1e-323;
       REAL(nk_vec)[k] = 0.0;
       nk_vec2[k]=0;
-      w_tmp[k] = _w[k];
     }
-//    RprintVecAsMat("_w", _w, 1, *K);
 
 
-
-
-
-    // 2) update zi - component labels
+    // 1) update zi - component labels
     for(j=0; j<*n; j++){
 //      Rprintf("j = %f\n", j);
       max_dens = dnorm(y[j], _mu[0], sqrt(_sigma2[0]), 1) + log(_w[0]);
@@ -257,9 +244,44 @@ static void ifmm_gibbs(double* y, int* n, int *K,
         _sigma2[k] = sigma2_tmp[nk_vecOrd[k]];
         _mu[k] = mu_tmp[nk_vecOrd[k]];
         _w[k] = w_tmp[nk_vecOrd[k]];
+        alpha_loc[k] = alpha_loc_tmp[nk_vecOrd[k]];
+        
       }
 //      rsort_with_index()
     }
+
+
+
+
+    // 2) update w
+    for(k=0; k<*K; k++){
+      if(*alpha_prior_type == 1){//symmetric dirichlet
+        alphastar[k] = _alpha;
+      }
+      if(*alpha_prior_type == 2){//asymmetric dirichlet
+        if(alpha_loc[k] == 1){
+          alphastar[k] = _alpha1;
+        }
+        if(alpha_loc[k] == 2){
+          alphastar[k] = _alpha2;
+        }
+      }
+//      Rprintf("alphastar = %f\n", alphastar[k]);
+      for(j=0; j<*n; j++){
+        if(_z[j] == (k+1)){
+          alphastar[k] = alphastar[k] + 1;
+        }
+      }
+    }
+
+    ran_dirich(alphastar, *K, scr1, _w);
+//    RprintVecAsMat("_w", _w, 1, *K);
+    for(k=0; k<*K; k++){
+      if(_w[k] < 1e-323) _w[k] = 1e-323;
+      w_tmp[k] = _w[k];
+      alpha_loc_tmp[k] = alpha_loc[k];
+    }
+//    RprintVecAsMat("_w", _w, 1, *K);
 
 
 
@@ -267,7 +289,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 
 
-    // 4) update mu
+    // 3) update mu
     for(k=0; k<*K; k++){
     
       sumy = 0.0;
@@ -300,7 +322,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
    
    
 
-    // 5) update sigma2
+    // 4) update sigma2
     for(k=0; k<*K; k++){
     
       // This is the independent prior for muk,sigma2k and sigmak ~ UN(0,A)
@@ -371,7 +393,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
     if(*hierarchy==1){
 
-      // 6) update mu0
+      // 5) update mu0
       summu = 0.0;
       for(k=0; k<*K; k++){
         summu = summu + _mu[k];
@@ -382,7 +404,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
       _mu0 = rnorm(mstar, sqrt(vstar));
 
 
-      // 7) update sigma20
+      // 6) update sigma20
       os = sqrt(_sigma20);
       ns = rnorm(os, 0.5);
       if(ns > 0){
@@ -412,9 +434,9 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 
 
-    // 8) update alpha
+    // 7) update alpha
 
-    // This code is for the sparse model for K+
+    // This code is for the sparse model for K+ with symmetric dirichlet
     if(*alpha_prior_type==1){ // sparse model
 
       // pc prior rather than gamma
@@ -526,7 +548,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
         }
 
       }
-      // Use gamma prior rather than pc prior
+      // Use gamma prior rather than pc prior, still symmetric dirichlet
       if(*alpha_prior_dist==2){ // gamma prior
         ao = _alpha;
         an = rnorm(ao, csiga);
@@ -552,7 +574,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 
 
-    // This code is for the centered prior on K+
+    // This code is for the centered prior on K+, now using an asymmetric dirichlet
     if(*alpha_prior_type==2){ // centered prior on K+
 
       // update a1
@@ -577,11 +599,11 @@ static void ifmm_gibbs(double* y, int* n, int *K,
             }
 
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
               }
-              if(k>=(*U)){
+              if(alpha_loc[k]==2){
                 ao_vec[k] = _alpha2;
                 an_vec[k] = _alpha2;
               }
@@ -611,11 +633,11 @@ static void ifmm_gibbs(double* y, int* n, int *K,
           an = rnorm(ao, csiga);
           if(an > 0){
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
               }
-              if(k>=(*U)){
+              if(alpha_loc[k]==2){
                 ao_vec[k] = _alpha2;
                 an_vec[k] = _alpha2;
               }
@@ -656,11 +678,11 @@ static void ifmm_gibbs(double* y, int* n, int *K,
             }
 
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
               }
-              if(k>=(*U)){
+              if(alpha_loc[k]==2){
                 ao_vec[k] = _alpha2;
                 an_vec[k] = _alpha2;
               }
@@ -691,13 +713,13 @@ static void ifmm_gibbs(double* y, int* n, int *K,
           an = rnorm(ao, (1e-3*csiga));
           if(an > 0){
             for(k=0; k<*K; k++){
-              if(k<(*U)){
+              if(alpha_loc[k]==1){
+                ao_vec[k] = _alpha1;
+                an_vec[k] = _alpha1;
+              }
+              if(alpha_loc[k]==2){
                 ao_vec[k] = ao;
                 an_vec[k] = an;
-              }
-              if(k>=(*U)){
-                ao_vec[k] = _alpha2;
-                an_vec[k] = _alpha2;
               }
             }
 //            RprintVecAsMat("an_vec", an_vec, 1, *K);
