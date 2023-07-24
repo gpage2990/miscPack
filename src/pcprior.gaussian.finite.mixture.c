@@ -56,9 +56,9 @@
 //
 
 static void ifmm_gibbs(double* y, int* n, int *K,
-            int *alpha_prior_type, int *alpha_prior_dist, 
+            int *alpha_prior_type, int *alpha_prior_dist,
             int *mu_sigma_prior, int *U,
-            int *basemodel, 
+            int *basemodel,
             double *alpha1_val, double *alpha2_val,
             int *update_alpha1, int *update_alpha2,
             double *y_grid, int *ndens_y, int *hierarchy,
@@ -93,7 +93,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
   double _mu[*K], _sigma2[*K], _w[*K], _alpha, _alpha1, _alpha2, _mu0, _sigma20;
   double mu_tmp[*K], sigma2_tmp[*K], w_tmp[*K];
   int _z[*n], nk_vec2[*K], z_tmp[*n], alpha_loc[*K], alpha_loc_tmp[*K];
-  
+
   int *nk_vecOrd = (int *) R_alloc(*K, sizeof(int));
   SEXP nk_vec = PROTECT(Rf_allocVector(REALSXP, *K));
 
@@ -113,15 +113,9 @@ static void ifmm_gibbs(double* y, int* n, int *K,
     _sigma2[k] = runif(0, *A);
     sigma2_tmp[k] = _sigma2[k];
 
-    _w[k] = 1/(*K);
+    _w[k] = 1.0/(*K);
     w_tmp[k] = _w[k];
-  }
-
-  for(j = 0; j < *n; j++){
-    _z[j] = rbinom(*K, 0.25);
-    z_tmp[j] = _z[j];
-  }
-
+    
     if(*alpha_prior_type == 2){//asymmetric dirichlet
       if(k<(*U)){
         alpha_loc[k] = 1;
@@ -134,6 +128,16 @@ static void ifmm_gibbs(double* y, int* n, int *K,
     }
   }
 
+
+
+  for(j = 0; j < *n; j++){
+    _z[j] = rbinom(*K, 0.25);
+    z_tmp[j] = _z[j];
+  }
+
+
+//  RprintIVecAsMat("alpha_loc_tmp", alpha_loc_tmp, 1, *K);
+//  RprintIVecAsMat("alpha_loc", alpha_loc, 1, *K);
 
   // Since I update w first in the MCMC algorithm,
   // I don't need to initialize it
@@ -162,6 +166,8 @@ static void ifmm_gibbs(double* y, int* n, int *K,
     }
   }
 
+  Rprintf("log_ao_density = %f\n", log_ao_density);
+
   // Metropolis tunning parameter
   double csiga = 0.5;
 
@@ -180,7 +186,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
   if(*mu_sigma_prior == 3){
     Rprintf("Prior values: m0 = %0.2f, k0 = %0.2f, nu0 = %0.2f, s20 = %0.2f\n", *m0, *k0, *nu0, *s20);
   }
-  
+
   ii = 0;
 
   for(i=0; i<*niter; i++){
@@ -245,12 +251,22 @@ static void ifmm_gibbs(double* y, int* n, int *K,
         _mu[k] = mu_tmp[nk_vecOrd[k]];
         _w[k] = w_tmp[nk_vecOrd[k]];
         alpha_loc[k] = alpha_loc_tmp[nk_vecOrd[k]];
-        
+
       }
 //      rsort_with_index()
     }
 
 
+//    RprintVecAsMat("nk_vec", nk_vec, 1, *K);
+//    RprintIVecAsMat("nk_vec2", nk_vec2, 1, *K);
+//    RprintIVecAsMat("z_tmp", z_tmp, 1, *n);
+//    RprintIVecAsMat("z", _z, 1, *n);
+//    RprintVecAsMat("sigma2_tmp", sigma2_tmp, 1, *K);
+//    RprintVecAsMat("_sigma2", _sigma2, 1, *K);
+//    RprintVecAsMat("w_tmp", w_tmp, 1, *K);
+//    RprintVecAsMat("_w", _w, 1, *K);
+//    RprintIVecAsMat("alpha_loc_tmp", alpha_loc_tmp, 1, *K);
+//    RprintIVecAsMat("alpha_loc", alpha_loc, 1, *K);
 
 
     // 2) update w
@@ -291,7 +307,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
     // 3) update mu
     for(k=0; k<*K; k++){
-    
+
       sumy = 0.0;
       nk = 0;
       for(j=0; j<*n; j++){
@@ -300,8 +316,8 @@ static void ifmm_gibbs(double* y, int* n, int *K,
           nk = nk+1;
         }
       }
-      
-      // This is the independent prior for muk,sigma2k so 
+
+      // This is the independent prior for muk,sigma2k so
       // muk ~ N(mu0, sigma20) and sigma2k ~ UN or sigma2k ~ IG
       if(*mu_sigma_prior != 3 ){
         vstar = 1.0/((nk/_sigma2[k]) + 1.0/(_sigma20));
@@ -309,25 +325,25 @@ static void ifmm_gibbs(double* y, int* n, int *K,
       }
 
       // This is for NIG prior on (muk|sigma^2k)(sigma^2k)
-      if(*mu_sigma_prior == 3){   
+      if(*mu_sigma_prior == 3){
         vstar = _sigma2[k]/(nk + *k0);
         mstar = (sumy + (*k0)*(_mu0))/(nk + *k0);
       }
-      
+
       _mu[k] = rnorm(mstar, sqrt(vstar));
       mu_tmp[k] = _mu[k];
     }
-   
+
 //    RprintVecAsMat("muk = ", _mu, 1, *K);
-   
-   
+
+
 
     // 4) update sigma2
     for(k=0; k<*K; k++){
-    
+
       // This is the independent prior for muk,sigma2k and sigmak ~ UN(0,A)
       if(*mu_sigma_prior == 1){
-    
+
         os = sqrt(_sigma2[k]);
         ns = rnorm(os, 0.5);
         if(ns > 0){
@@ -347,7 +363,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
         }
       }
-        
+
       // This is the independent prior for muk,sigma2k and sigmak ~ IG(a0,b0)
       if(*mu_sigma_prior == 2){
         ssq=0.0, nk=0;
@@ -359,7 +375,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
         }
         astar = 0.5*(nk) + *a0;
         bstar = 0.5*ssq + *b0;
-        
+
         _sigma2[k] = 1/rgamma(astar, 1/bstar);
       }
 
@@ -375,13 +391,13 @@ static void ifmm_gibbs(double* y, int* n, int *K,
         }
         astar = 0.5*(nk + 1 + *nu0);
         bstar = 0.5*ssq + 0.5*(*k0)*(mu[k]- _mu0)*(mu[k]- _mu0) + 2*((*s20)/(*nu0));
-        
+
         _sigma2[k] = 1/rgamma(astar, 1/bstar);
       }
-      
+
       sigma2_tmp[k] = _sigma2[k];
     }
-    
+
 //    RprintVecAsMat("sigma2 = ", _sigma2, 1, *K);
 
 
@@ -609,10 +625,17 @@ static void ifmm_gibbs(double* y, int* n, int *K,
               }
             }
 
+//            RprintVecAsMat("_w", _w, 1, *K);
+//            RprintVecAsMat("ao_vec", ao_vec, 1, *K);
+//            RprintVecAsMat("an_vec", an_vec, 1, *K);
+//            Rprintf("ddirich(_w, ao_vec, *K, 1) = %f\n", ddirich(_w, ao_vec, *K, 1));
+//            Rprintf("ddirich(_w, an_vec, *K, 1) = %f\n", ddirich(_w, an_vec, *K, 1));
+//            Rprintf("log_ao_density = %f\n", log_ao_density);
+//            Rprintf("log_an_density = %f\n", log_an_density);
             llo = ddirich(_w, ao_vec, *K, 1) + log(log_ao_density);
             lln = ddirich(_w, an_vec, *K, 1) + log(log_an_density);
-//          Rprintf("llo = %f\n", llo);
-//          Rprintf("lln = %f\n", lln);
+//            Rprintf("llo = %f\n", llo);
+//            Rprintf("lln = %f\n", lln);
 
 
 
@@ -739,8 +762,10 @@ static void ifmm_gibbs(double* y, int* n, int *K,
           }
         }
       }
-
     }
+//    Rprintf("alpha1 = %f\n", alpha1);
+    
+    
     // keep iterates
     if((i > (*nburn-1)) & ((i) % *nthin ==0)){
 //      Rprintf("ii = %d\n", ii);
@@ -775,7 +800,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 
   }
-  
+
   UNPROTECT(1); // seems like you forgot this
 }
 
@@ -786,7 +811,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
 SEXP IFMM_GIBBS(SEXP y, SEXP n, SEXP K, SEXP alpha_prior_type, SEXP alpha_prior_dist,
                 SEXP mu_sigma_prior, SEXP U,
-                SEXP basemodel, 
+                SEXP basemodel,
                 SEXP alpha1_val, SEXP alpha2_val,
                 SEXP update_alpha1, SEXP update_alpha2,
                 SEXP y_grid, SEXP ndens_y, SEXP hierarchy,
@@ -795,7 +820,7 @@ SEXP IFMM_GIBBS(SEXP y, SEXP n, SEXP K, SEXP alpha_prior_type, SEXP alpha_prior_
                 SEXP alpha2_grid, SEXP alpha2_density, SEXP ndens_alpha2,
                 SEXP m0, SEXP s20, SEXP A, SEXP A0,
                 SEXP a0, SEXP b0, SEXP nu0, SEXP k0,
-                SEXP a_gam, SEXP b_gam, SEXP a1_gam, SEXP b1_gam, 
+                SEXP a_gam, SEXP b_gam, SEXP a1_gam, SEXP b1_gam,
                 SEXP a2_gam, SEXP b2_gam,
  	            SEXP niter, SEXP nburn, SEXP nthin){
 
@@ -875,16 +900,16 @@ SEXP IFMM_GIBBS(SEXP y, SEXP n, SEXP K, SEXP alpha_prior_type, SEXP alpha_prior_
 
   GetRNGstate();
 
-  ifmm_gibbs(REAL(y), &_n, &_K, &_alpha_prior_type, &_alpha_prior_dist, 
+  ifmm_gibbs(REAL(y), &_n, &_K, &_alpha_prior_type, &_alpha_prior_dist,
               &_mu_sigma_prior, &_U,
-              &_basemodel, 
+              &_basemodel,
               &_alpha1_val, &_alpha2_val,
               &_update_alpha1, &_update_alpha2,
               REAL(y_grid), &_ndens_y, &_hierarchy,
               REAL(alpha_grid), REAL(alpha_density), &_ndens_alpha,
               REAL(alpha1_grid), REAL(alpha1_density), &_ndens_alpha1,
               REAL(alpha2_grid), REAL(alpha2_density), &_ndens_alpha2,
-              &_m0, &_s20, &_A, &_A0, &_a0, &_b0, &_nu0, &_k0, 
+              &_m0, &_s20, &_A, &_A0, &_a0, &_b0, &_nu0, &_k0,
               &_a_gam, &_b_gam, &_a1_gam, &_b1_gam, &_a2_gam, &_b2_gam,
               &_niter, &_nburn, &_nthin,
               MUout, SIGMA2out, Wout, Zout, ALPHAout, ALPHA1out, ALPHA2out,

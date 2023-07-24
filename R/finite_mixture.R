@@ -40,6 +40,7 @@ informed_mixture <- function(y, K=25,
                              alpha_prior_type="centered",
                              alpha_prior_dist="pc",
                              mu_sigma_prior = 1,
+                             mylambda = NULL,
                              basemodel=0,
                              U=4,
                              alpha1_val = 1.0,
@@ -67,22 +68,26 @@ informed_mixture <- function(y, K=25,
 
   n <- length(y)
   ygrid <- seq(min(y)-1, max(y)+1, length=ndens_y)
+
+  if(!is.null(mylambda)) cat("employing user supplied lambda", mylambda, "\n")
+
   if(alpha_prior_type=="sparse" & alpha_prior_dist=="pc"){
     if(is.null(alpha_grid)){
       if(basemodel==0){
         alpha_grid <- exp(seq(log(alpha0), log(alphaMax), length.out = 1e4))
 
-        cat("working on finding lambda", "\n")
-        lambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=alpha0, agrid=alpha_grid,
-                                   K=K, basemodel=0, n.obs=n, n.samples=1e4,
-                                   alphamax=alphaMax,truncation=TRUE)
+        if(is.null(mylambda)){
+          cat("working on finding lambda", "\n")
+          mylambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=alpha0, agrid=alpha_grid,
+                                     K=K, basemodel=0, n.obs=n, n.samples=1e4,
+                                     alphamax=alphaMax,truncation=TRUE)
 
-        cat("found lambda = ", lambda, "\n")
-        alpha_density <- pcprior.a2(agrid, lam=lambda, K=K,
-                                            alpha0=alpha0, agrid=agrid,
-                                            alphamax=alphaMax, TR=TRUE)
+          cat("found lambda = ", mylambda, "\n")
+        }
+        alpha_density <- pcprior.a2(agrid, lam=mylambda, K=K,
+                                              alpha0=alpha0, agrid=agrid,
+                                              alphamax=alphaMax, TR=TRUE)
       }
-
       # This is obsolete as we want to the centered prior specification
       if(basemodel==1){
         alpha_grid <- exp(seq(log(0+1e-15), log(1), length.out = 10000))
@@ -90,12 +95,15 @@ informed_mixture <- function(y, K=25,
 #                                n.obs=n,n.samples=10000,agrid=alpha_grid,
 #                                interval=range(alpha_grid))
         cat("working on finding lambda", "\n")
-        lambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=1, agrid=alpha_grid,
-                                  K=K, basemodel=1, n.obs=n, n.samples=10000,
-                                  alphamax=1e-15,truncation=TRUE)
-        cat("found lambda", "\n")
+        if(is.null(mylambda)){
+          mylambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=1, agrid=alpha_grid,
+                                    K=K, basemodel=1, n.obs=n, n.samples=10000,
+                                    alphamax=1e-15,truncation=TRUE)
+          cat("found lambda", "\n")
+          cat("lambda = ", mylambda, "\n")
+        }
         alpha_density <- pcprior.a2(a.eval=agrid,
-                                        lam=lambda,
+                                        lam=mylambda,
                                         K=K,
                                         alpha0=1,
                                         agrid=alpha_grid,
@@ -103,7 +111,6 @@ informed_mixture <- function(y, K=25,
                                         TR=TRUE)
       }
     }
-    cat("lambda = ", lambda, "\n")
   }
 
   if(alpha_prior_type == "centered" & alpha_prior_dist=="pc"){
@@ -113,7 +120,6 @@ informed_mixture <- function(y, K=25,
 
     if(update_alpha1==TRUE){
 
-      cat("working on finding lambda", "\n")
       # set initial search interval for lambda
       lam.ini <- c(1e-3, 3)
       ndens_alpha1 <- 1e3
@@ -121,27 +127,31 @@ informed_mixture <- function(y, K=25,
       alpha1_grid <- exp(seq(log(1e-5), log(a1.max), length.out = 1e4))
       alpha_grid <- alpha1_grid
       U.lwr <- U - 1
-      mylambda <- miscPack:::lambda_finder_pcprior.asym.a1(U = U,
-                                                U.lwr = U.lwr,
-                                                tail.prob = tail.prob,
-                                                K = K,
-                                                alpha1.base=U,
-                                                alpha2.base=1e-5,
-                                                alpha2.fixed=1e-5,
-                                                agrid=alpha1_grid,
-                                                n.obs=n,
-                                                n.samples=1e4,
-                                                TR=TRUE,
-                                                lambda.interval=lam.ini,
-                                                tol=1e-5)
+      if(is.null(mylambda)){
+        cat("working on finding lambda", "\n")
+        mylambda <- miscPack:::lambda_finder_pcprior.asym.a1(U = U,
+                                                  U.lwr = U.lwr,
+                                                  tail.prob = tail.prob,
+                                                  K = K,
+                                                  alpha1.base=U,
+                                                  alpha2.base=1e-5,
+                                                  alpha2.fixed=alpha2_val,
+                                                  agrid=alpha1_grid,
+                                                  n.obs=n,
+                                                  n.samples=1e4,
+                                                  TR=TRUE,
+                                                  lambda.interval=lam.ini,
+                                                  tol=1e-5)
 
-      cat("found lambda = ", mylambda, "\n")
+        cat("found lambda = ", mylambda, "\n")
+      }
       alpha1_density <- miscPack:::pcprior.asym.a1(a.eval=alpha1_grid, lam=mylambda,
                                                    U=U, K=K, alpha1.base = U,
                                                    alpha2.base = 1e-5,
-                                                   alpha2.fixed = 1e-5,
+                                                   alpha2.fixed = alpha2_val,
                                                    agrid=alpha1_grid,
                                                    TR=TRUE)
+      alpha_density <- alpha1_density
 
     }
     if(update_alpha2==TRUE){
@@ -193,8 +203,11 @@ informed_mixture <- function(y, K=25,
   if(hierarchy=="NO"){run$mu0 <- NULL; run$sigma20 <- NULL}
   run$kp <- apply(run$z,1,function(x)length(unique(x)))
   run$ygrid <- ygrid
-  run$lambda_val <- mylambda
-  run$alpha_grid <- alpha_grid
+  if(alpha_prior_dist== "pc"){
+    run$lambda_val <- mylambda
+    run$alpha_grid <- alpha_grid
+    run$alpha_density <- alpha_density
+  }
   run
 }
 
@@ -204,6 +217,7 @@ informed_mixture <- function(y, K=25,
 pspline_mixture <- function(y, t, ids, K,
                             alpha_prior_type="centered",
                             alpha_prior_dist="pc",
+                            mylambda = NULL,
                             basemodel=0,
                             U=4,
                             alpha1_val = 1.0,
@@ -213,8 +227,10 @@ pspline_mixture <- function(y, t, ids, K,
                             tail.prob=0.9,
                             ndx = 10, q = 3, ndens_y = 1,
                             A=1, Akap=1,
-                            U_tau=1, a_tau=0.1, U_omega=1, a_omega=0.1,
-                            a_gam=1, b_gam = 1, a1_gam =1, b1_gam=1,
+                            U_tau=1, a_tau=0.1,
+                            U_omega=1, a_omega=0.1,
+                            a_gam=1, b_gam = 1,
+                            a1_gam =1, b1_gam=1,
                             a2_gam=1, b2_gam=2,
                             alpha_grid, alpha_density,
                             niter, nburn, nthin){
@@ -277,13 +293,15 @@ pspline_mixture <- function(y, t, ids, K,
       if(basemodel==0){
         alpha_grid <- exp(seq(log(alpha0), log(alphaMax), length.out = 1e4))
 
-        cat("working on finding lambda", "\n")
-        lambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=alpha0, agrid=alpha_grid,
-                                K=K, basemodel=0, n.obs=n, n.samples=1e4,
-                                alphamax=alphaMax,truncation=TRUE)
+        if(is.null(mylambda)){
+          cat("working on finding lambda", "\n")
+          mylambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=alpha0, agrid=alpha_grid,
+                                  K=K, basemodel=0, n.obs=n, n.samples=1e4,
+                                  alphamax=alphaMax,truncation=TRUE)
 
-        cat("found lambda = ", lambda, "\n")
-        alpha_density <- pcprior.a2(agrid, lam=lambda, K=K,
+          cat("found lambda = ", mylambda, "\n")
+        }
+        alpha_density <- pcprior.a2(agrid, lam=mylambda, K=K,
                                     alpha0=alpha0, agrid=agrid,
                                     alphamax=alphaMax, TR=TRUE)
       }
@@ -294,13 +312,16 @@ pspline_mixture <- function(y, t, ids, K,
         #       lambda <- lambda_givenU(U=U,tail.prob=tail.prob,K=K,alpha0=1,
         #                                n.obs=n,n.samples=10000,agrid=alpha_grid,
         #                                interval=range(alpha_grid))
-        cat("working on finding lambda", "\n")
-        lambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=1, agrid=alpha_grid,
-                                K=K, basemodel=1, n.obs=n, n.samples=10000,
-                                alphamax=1e-15,truncation=TRUE)
-        cat("found lambda", "\n")
+        if(is.null(mylambda)){
+          cat("working on finding lambda", "\n")
+          mylambda <- lambda_finder(U=U, tail.prob=tail.prob, alpha0=1, agrid=alpha_grid,
+                                  K=K, basemodel=1, n.obs=n, n.samples=10000,
+                                  alphamax=1e-15,truncation=TRUE)
+          cat("found lambda", "\n")
+          cat("lambda = ", mylambda, "\n")
+        }
         alpha_density <- pcprior.a2(a.eval=agrid,
-                                    lam=lambda,
+                                    lam=mylambda,
                                     K=K,
                                     alpha0=1,
                                     agrid=alpha_grid,
@@ -308,7 +329,6 @@ pspline_mixture <- function(y, t, ids, K,
                                     TR=TRUE)
       }
     }
-    cat("lambda = ", lambda, "\n")
   }
 
   if(alpha_prior_type == "centered" & alpha_prior_dist=="pc"){
@@ -318,32 +338,34 @@ pspline_mixture <- function(y, t, ids, K,
 
     if(update_alpha1==TRUE){
 
-      cat("working on finding lambda", "\n")
       # set initial search interval for lambda
       lam.ini <- c(1e-3, 3)
       ndens_alpha1 <- 1e3
       a1.max <- U-1e-3  # the max value here is U.  We just move below for numerical
       alpha1_grid <- exp(seq(log(1e-5), log(a1.max), length.out = 1e4))
       U.lwr <- U - 1
-      mylambda <- miscPack:::lambda_finder_pcprior.asym.a1(U = U,
-                                                           U.lwr = U.lwr,
-                                                           tail.prob = tail.prob,
-                                                           K = K,
-                                                           alpha1.base=U,
-                                                           alpha2.base=1e-5,
-                                                           alpha2.fixed=1e-5,
-                                                           agrid=alpha1_grid,
-                                                           n.obs=n,
-                                                           n.samples=1e4,
-                                                           TR=TRUE,
-                                                           lambda.interval=lam.ini,
-                                                           tol=1e-5)
+      if(is.null(mylambda)){
+        mylambda <- miscPack:::lambda_finder_pcprior.asym.a1(U = U,
+                                                             U.lwr = U.lwr,
+                                                             tail.prob = tail.prob,
+                                                             K = K,
+                                                             alpha1.base=U,
+                                                             alpha2.base=1e-5,
+                                                             alpha2.fixed=alpha2_val,
+                                                             agrid=alpha1_grid,
+                                                             n.obs=n,
+                                                             n.samples=1e4,
+                                                             TR=TRUE,
+                                                             lambda.interval=lam.ini,
+                                                             tol=1e-5)
 
-      cat("found lambda = ", mylambda, "\n")
+        cat("found lambda = ", mylambda, "\n")
+      }
+      if(!is.null(mylambda)) cat("employing user supplied lambda", mylambda, "\n")
       alpha1_density <- miscPack:::pcprior.asym.a1(a.eval=alpha1_grid, lam=mylambda,
                                                    U=U, K=K, alpha1.base = U,
                                                    alpha2.base = 1e-5,
-                                                   alpha2.fixed = 1e-5,
+                                                   alpha2.fixed = alpha2_val,
                                                    agrid=alpha1_grid,
                                                    TR=TRUE)
       # These two are necessary to find the initial
@@ -381,7 +403,7 @@ pspline_mixture <- function(y, t, ids, K,
   nobs <- nobs[1]
   run <- .Call("PSPLINE_IFMM_GIBBS",
           as.double(y), as.double(t(Xmat)), as.integer(n), as.integer(nobs),           #4
-          as.double(t(S)), as.integer(nb), as.integer(K),                       #3
+          as.double(t(S.scaled)), as.integer(nb), as.integer(K),                       #3
           as.integer(ifelse(alpha_prior_type=="sparse",1 ,2)),                         #1
           as.integer(ifelse(alpha_prior_dist=="pc",1 ,2)),                             #1
           as.integer(U),                                                               #1
@@ -402,6 +424,9 @@ pspline_mixture <- function(y, t, ids, K,
   run$kp <- apply(run$z, 1, function(x)length(unique(x)))
   run$Xmat <- Xmat
   run$U <- U
+  if(alpha_prior_dist== "pc") run$lambda_pc_val <- mylambda
+  run$alpha_grid <- alpha_grid
+
   run
 }
 
