@@ -1,13 +1,22 @@
-gaussian_mixture <- function(y, N, m, v, a, b, alpha, niter, nburn, nthin){
+gaussian_mixture <- function(y, Xmat=NULL, N, m, v, a, b, alpha, niter, nburn, nthin){
 
   n <- length(y)
-
-  run <- .Call("GIBBS",
-                  as.double(y), as.integer(n), as.integer(N),
-                  as.double(m), as.double(v), as.double(a), as.double(b),
-				          as.double(alpha),
-                  as.integer(niter), as.integer(nburn), as.integer(nthin))
-
+  p <- ncol(Xmat)
+  if(is.null(Xmat)){
+    run <- .Call("GIBBS",
+                    as.double(y), as.integer(n), as.integer(N),
+                    as.double(m), as.double(v), as.double(a), as.double(b),
+			  	          as.double(alpha),
+                    as.integer(niter), as.integer(nburn), as.integer(nthin))
+  } else {
+    m <- 0;
+    run <- .Call("GIBBS_REG",
+                 as.double(y), as.double(t(Xmat)),
+                 as.integer(n), as.integer(N), as.integer(p),
+                 as.double(m), as.double(v), as.double(a), as.double(b),
+                 as.double(alpha),
+                 as.integer(niter), as.integer(nburn), as.integer(nthin))
+  }
 
   run
 }
@@ -66,7 +75,7 @@ informed_mixture <- function(y, K=25,
   # 2 - (muk, sigma2k) ~ N(mu0, sigma20) x IG(a0, b0)
   # 3 - (muk, sigma2k) ~ N(mu0, 1/k0sigma2k) x IG(1/2nu0, 1/2(nu0/s20)) This one matches Rafaelle
 
-  n <- length(y)
+  n <- nrow(cbind(y))
   ygrid <- seq(min(y)-1, max(y)+1, length=ndens_y)
 
   if(!is.null(mylambda)) cat("employing user supplied lambda", mylambda, "\n")
@@ -176,8 +185,37 @@ informed_mixture <- function(y, K=25,
 #  print(summary(alpha1_grid))
 #  print(summary(alpha2_grid))
 
-#  plot(alpha_grid, alpha_density, type='l')
-  run <- .Call("IFMM_GIBBS",
+  if(ncol(cbind(y)) > 1){
+    p <- ncol(cbind(y))
+    #  plot(alpha_grid, alpha_density, type='l')
+    M0 <- m0
+    Sigma0 <- s20*diag(p)
+    K0 <- k0*diag(p)
+    run <- .Call("MVT_IFMM_GIBBS",
+                 as.double(t(y)), as.integer(n), as.integer(p), as.integer(K),
+                 as.integer(ifelse(alpha_prior_type=="sparse",1 ,2)),
+                 as.integer(ifelse(alpha_prior_dist=="pc",1 ,2)),
+                 as.integer(mu_sigma_prior),
+                 as.integer(U),
+                 as.integer(basemodel),
+                 as.double(alpha1_val), as.double(alpha2_val),
+                 as.integer(update_alpha1), as.integer(update_alpha2),
+                 as.double(ygrid), as.integer(ndens_y),
+                 as.integer(ifelse(hierarchy=="NO", 0, 1)),
+                 as.double(alpha_grid), as.double(alpha_density), as.integer(ndens_alpha),
+                 as.double(alpha1_grid), as.double(alpha1_density), as.integer(ndens_alpha1),
+                 as.double(alpha2_grid), as.double(alpha2_density), as.integer(ndens_alpha2),
+                 as.double(M0), as.double(Sigma0),  as.integer(nu0), as.double(K0),
+                 as.double(A), as.double(a0), as.double(b0),
+                 as.double(a_gam), as.double(b_gam),
+                 as.double(a1_gam), as.double(b1_gam),
+                 as.double(a2_gam), as.double(b2_gam),
+                 as.integer(niter), as.integer(nburn), as.integer(nthin))
+
+  } else {
+
+    #  plot(alpha_grid, alpha_density, type='l')
+    run <- .Call("IFMM_GIBBS",
                  as.double(y), as.integer(n), as.integer(K),
                  as.integer(ifelse(alpha_prior_type=="sparse",1 ,2)),
                  as.integer(ifelse(alpha_prior_dist=="pc",1 ,2)),
@@ -197,6 +235,9 @@ informed_mixture <- function(y, K=25,
                  as.double(a1_gam), as.double(b1_gam),
                  as.double(a2_gam), as.double(b2_gam),
                  as.integer(niter), as.integer(nburn), as.integer(nthin))
+
+
+  }
 
   if(alpha_prior_type=="centered") run$alpha <- NULL
   if(alpha_prior_type!="centered"){run$alpha1 <- NULL; run$alpha2 <- NULL}
@@ -267,13 +308,15 @@ pspline_mixture <- function(y, t, ids, K,
   G <- bbase(tt, ndx = ndx, bdeg = q)
 
   # Smoothing matrix
-  D <- diff(diag(ncol(G)), differences = 2)
+  D <- diff(diag(ncol(G)), differences = 1)
   S <- crossprod(D)
 #  S[1,1] <- 2 # to make invertible
-
-
+  S <- S + 0.01*diag(ncol(S))
+#  print(solve(S))
   nb <- ncol(S)
+
   Xmat <- G
+  weights <- apply(Xmat,2,sum)/sum(apply(Xmat,2,sum))
 
   # As of now, I am not permitting unbalanced designs.
   if(!balanced) {
@@ -344,7 +387,9 @@ pspline_mixture <- function(y, t, ids, K,
       a1.max <- U-1e-3  # the max value here is U.  We just move below for numerical
       alpha1_grid <- exp(seq(log(1e-5), log(a1.max), length.out = 1e4))
       U.lwr <- U - 1
+      if(!is.null(mylambda)) cat("employing user supplied lambda", mylambda, "\n")
       if(is.null(mylambda)){
+        cat("working on finding lambda", "\n")
         mylambda <- miscPack:::lambda_finder_pcprior.asym.a1(U = U,
                                                              U.lwr = U.lwr,
                                                              tail.prob = tail.prob,
@@ -361,7 +406,6 @@ pspline_mixture <- function(y, t, ids, K,
 
         cat("found lambda = ", mylambda, "\n")
       }
-      if(!is.null(mylambda)) cat("employing user supplied lambda", mylambda, "\n")
       alpha1_density <- miscPack:::pcprior.asym.a1(a.eval=alpha1_grid, lam=mylambda,
                                                    U=U, K=K, alpha1.base = U,
                                                    alpha2.base = 1e-5,
@@ -372,6 +416,18 @@ pspline_mixture <- function(y, t, ids, K,
       # log_ao_density
       alpha_density <- alpha1_density
       alpha_grid <- alpha1_grid
+      Kplus.draw <- impliedpcprior.asym.a1.Kplus(lam=mylambda,
+                                                 U = U,
+                                                 K = K,
+                                                 alpha1.base=U,
+                                                 alpha2.base=1e-5,
+                                                 alpha2.fixed=1e-5,
+                                                 agrid=alpha1_grid,
+                                                 n.obs = n,
+                                                 n.samples = 1e4,
+                                                 TR=TRUE)$Kplus
+      cat("Pr(K+ < U)", mean(Kplus.draw<U), "\n")
+      cat("5 number summary of implied prior of K+", "\n", summary(Kplus.draw), "\n")
 
     }
     if(update_alpha2==TRUE){
@@ -393,8 +449,8 @@ pspline_mixture <- function(y, t, ids, K,
   ndens_alpha2 <- length(alpha2_density)
 
 
-  print(summary(alpha1_grid))
-  print(summary(alpha1_density))
+  # print(summary(alpha1_grid))
+  # print(summary(alpha1_density))
 
   geom.mean <- function(x) exp(mean(log(diag(ginv(x)))))
   gm <- geom.mean(S)
@@ -403,11 +459,11 @@ pspline_mixture <- function(y, t, ids, K,
   nobs <- nobs[1]
   run <- .Call("PSPLINE_IFMM_GIBBS",
           as.double(y), as.double(t(Xmat)), as.integer(n), as.integer(nobs),           #4
-          as.double(t(S.scaled)), as.integer(nb), as.integer(K),                       #3
+          as.double(t(S)), as.integer(nb), as.integer(K),                              #3
           as.integer(ifelse(alpha_prior_type=="sparse",1 ,2)),                         #1
           as.integer(ifelse(alpha_prior_dist=="pc",1 ,2)),                             #1
           as.integer(U),                                                               #1
-          as.integer(basemodel),                                                       #1
+          as.integer(basemodel), as.double(weights),                                   #2
           as.double(alpha1_val), as.double(alpha2_val),                                #2
           as.integer(update_alpha1), as.integer(update_alpha2),                        #2
           as.double(alpha_grid), as.double(alpha_density), as.integer(ndens_alpha),    #3
@@ -419,7 +475,7 @@ pspline_mixture <- function(y, t, ids, K,
           as.double(a1_gam), as.double(b1_gam),                                        #2
           as.double(a2_gam), as.double(b2_gam),                                        #2
           as.integer(niter), as.integer(nburn), as.integer(nthin))                     #3
-                                                                                       #37 - total
+                                                                                       #38 - total
 
   run$kp <- apply(run$z, 1, function(x)length(unique(x)))
   run$Xmat <- Xmat

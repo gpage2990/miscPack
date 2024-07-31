@@ -4,11 +4,14 @@
 \alias{informed_mixture}
 \title{Function that fits Gaussian finite mixture model with a variety of induced prior specifications on the number of data clusters.  These models specify a large number of components K}
 \usage{
+
+
 informed_mixture(y,
                  K=25,
                  alpha_prior_type="centered",
                  alpha_prior_dist="pc",
                  mu_sigma_prior=1,
+                 mylambda = NULL,
                  basemodel=0,
                  U=4,
                  alpha1_val = 1.0,
@@ -36,35 +39,44 @@ informed_mixture(y,
 }
 
 \arguments{
-\item{y}{numeric vector containing response variable}
-\item{K}{number of components in the finite mixture}
+\item{y}{a numeric vector or matrix containing response variable.}
+\item{K}{number of components in the finite mixture.}
 
 \item{alpha_prior_type}{prior specification on alpha with the following two options:}
 \itemize{
   \item {sparse - symmetric dirichlet with sparse prior on alpha1}
 	\item {centered - asymmetric dirichlet}
 }
-\item{alpha_prior_dist}{The distribution}
+\item{alpha_prior_dist}{The distribution used as a prior for alpha1}
 \itemize{
   \item {gamma - gamma distribution for alpha1}
 	\item {pc - penalized complexity prior for alpha1}
 }
-\item{mu_sigma_prior}{The prior distribution used for atoms (muk, sigma2k)}
+\item{mu_sigma_prior}{If y is a vector, the prior distribution used for atoms (muk, sigma2k)
+
 \itemize{
-  \item {1 - muk ~ N(m0, s20), sigmak ~ UN(0,A)}
-	\item {2 - muk ~ N(m0, s20), sigma2k ~ IG(a0, b0)}
+  \item {1 - muk ~ N(mu0, s20), sigmak ~ UN(0,A)}
+	\item {2 - muk ~ N(mu0, s20), sigma2k ~ IG(a0, b0)}
 	\item {3 - (muk, sigma2k) ~ NIG(m0, k0, nu0, s20)}
 }
-\item{basemodel}{If 0, then basemodel for sparse prior is one componentInidicator determining which base model to use.  This is obslete}
-\item{U}{The mode number of data clusters a priori}
+If y is a matrix, the prior distributions for vector muk and matrix Sigmak
+\itemize{
+  \item {1 - muk ~ N(m0, s20*I), Sigmak ~ IW(nu0, k0*I)}
+	\item {2 - muk ~ N(m0, s20*I), Sigmak = sigma2k*I with sigmak ~ UN(0,A)}
+	\item {3 - muk ~ N(m0, s20*I), Sigmak = sigma2k*I with sigmak ~ IG(a0, b0)}
+}
+
+}
+\item{basemodel}{If 0, then basemodel for sparse prior is one component. This argument is obslete}
+\item{U}{The user-supplied value informing the number of data clusters a priori}
 \item{alpha1_val}{starting value for alpha1 if alpha1 is updated, otherwise it is the value to which alpha1 is fixed}
 \item{alpha2_val}{starting value for alpha2 if alpha2 is updated, otherwise it is the value to which alpha2 is fixed}
 \item{update_alpha1}{indicator determining if alpha1 should be udpated}
 \item{update_alpha2}{indicator determining if alpha2 should be udpated}
-\item{hierarchy}{If "YES", then mu_k ~ N(mu_0, sigma2_0), mu_0 ~ N(m0, s20), and sigma_0 ~ UN(0,A0)}
-\item{m0}{mean of the prior distribution for mu_k if hierarchy = "No".  If hierarchy = "Yes", then it is the prior distribution for mu0 where my_k ~ N(mu0, sigma20).}
-\item{s20}{variance of the prior distribution for mu_k}
-\item{A}{upper bound of the uniform prior for sigma_k}
+\item{hierarchy}{If "YES", then mu_k ~ N(mu0, sigma20), mu0 ~ N(m0, s20), and sigma0 ~ UN(0,A0)}
+\item{m0}{mean of the prior distribution for muk if hierarchy = "No".  If hierarchy = "Yes", then it is the prior distribution for mu0 where muk ~ N(mu0, sigma20).}
+\item{s20}{variance of the prior distribution for muk if y is a vector}
+\item{A}{upper bound of the uniform prior for sigmaK, if y is a vector}
 \item{A0}{needed for the hierarchical model only. It is the upper bound on the uniform of sigma0.}
 \item{a0}{shape parameter of inverse gamma if mu_sigma_prior = 2 so that sigma2k ~ IG(a0, b0)}
 \item{b0}{scale parameter of inverse gamma if mu_sigma_prior = 2 so that sigma2k ~ IG(a0, b0)}
@@ -81,11 +93,11 @@ informed_mixture(y,
 }
 
 \details{
-This function carries out posterior sampling based on Neal's algorithm 8.
+This function carries out posterior sampling of a Finite mixture.
 }
 
 \value{
-This function returns in a list the missing matrix, and MCMC iterates of all model parameters.  If psm=TRUE, then a vector containing indicator of which missing pattern each subject and the number of observations in each missing pattern is also provided.
+This function returns MCMC samples of all model parameters
 }
 \examples{
 

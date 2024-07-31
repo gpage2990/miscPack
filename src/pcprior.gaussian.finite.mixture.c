@@ -115,7 +115,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
 
     _w[k] = 1.0/(*K);
     w_tmp[k] = _w[k];
-    
+
     if(*alpha_prior_type == 2){//asymmetric dirichlet
       if(k<(*U)){
         alpha_loc[k] = 1;
@@ -145,7 +145,7 @@ static void ifmm_gibbs(double* y, int* n, int *K,
   // scratch vectors to update parameters
   double sumdens, cprob, sumy=0.0, ssq=0.0, summu=0.0;
   double mstar, vstar, astar, bstar, max_dens, ns, os;
-  double p0, an, ao, log_ao_density, log_an_density, llo,lln,llr,uu;
+  double p0, an, ao, log_ao_density=0.0, log_an_density, llo,lln,llr,uu;
   double scr1[*K], dens[*ndens_y], ao_vec[*K], an_vec[*K];
 
 //  double A = 100.0, A0=15.0;
@@ -764,8 +764,8 @@ static void ifmm_gibbs(double* y, int* n, int *K,
       }
     }
 //    Rprintf("alpha1 = %f\n", alpha1);
-    
-    
+
+
     // keep iterates
     if((i > (*nburn-1)) & ((i) % *nthin ==0)){
 //      Rprintf("ii = %d\n", ii);
