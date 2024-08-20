@@ -316,7 +316,7 @@ pspline_mixture <- function(y, t, ids, K,
   # print(S.scale)
   # print(exp(mean(log(diag(ginv(S.scale)))))); this should be 1 if scaled right
   #  S[1,1] <- 2 # to make invertible
-  S <- S.scale + 5e-3*diag(ncol(S))
+  S <- S.scale + 1e-3*diag(ncol(S))
   # print(solve(S))
   nb <- ncol(S)
 

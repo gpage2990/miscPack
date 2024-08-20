@@ -40,6 +40,31 @@ predict.bbase <- function(object, newx) {
 }
 
 
+# Functions that are useful
+relabel <- function(z) {
+  # Get the unique labels in the input vector
+  unique_labels <- unique(z)
+
+  # Create a mapping from old labels to new labels
+  old_to_new_labels <- 1:length(unique_labels)
+  names(old_to_new_labels) <- unique_labels
+
+  # Use the match() function to update labels
+  new_labels <- old_to_new_labels[match(z, unique_labels)]
+
+  match(z, unique_labels)
+}
+
+
+# in Eilers 1996 viene useto il package splines e la seguente funzione
+bspline = function(x, xl, xr, ndx, bdeg) {
+  dx = (xr - xl) / ndx
+  knots = seq(xl - bdeg * dx, xr + bdeg * dx, by = dx)
+  B = spline.des(knots, x, bdeg + 1, 0 * x, outer.ok = TRUE)$design
+  B
+}
+
+
 # Kullback-Leibler distance between two Symmetric Dirichlet:
 # KLD[Dir(alpha)|Dir(alpha0)]
 kld <- function(alpha, alpha0){
@@ -58,18 +83,18 @@ kld <- function(alpha, alpha0){
 
 # alpha0 is the value of alpha at the base model
 # alphamax is the value of alpha that is most far apart from alpha0 (most flex model)
-draw.a <- function(lam, 
-                   K, 
+draw.a <- function(lam,
+                   K,
                    basemodel=0,
-                   alpha0, 
-                   n.samples, 
+                   alpha0,
+                   n.samples,
                    agrid,
                    alphamax,
                    TR=T){
   a <- agrid
   if (basemodel==0) b.texp <- sqrt(2*kld(rep(alphamax,K),rep(alpha0,K)))
   if (basemodel==1) b.texp <- Inf # sqrt(2*kld(rep(alphamax,K),rep(alpha0,K)))
-  
+
   # evaluate the kullback-Leibler distance
   kld_val <- sapply(a, function(x) sqrt(2*kld(rep(x,K),rep(alpha0,K))))
   #a.to.kld <- splinefun(a, kld_val)
@@ -87,18 +112,18 @@ draw.a <- function(lam,
 }
 
 # sample from the implied distribution of K+
-draw.Kplus <- function(lam, K, 
-                       basemodel=0, 
-                       alpha0, 
-                       n.obs, 
-                       n.samples, 
+draw.Kplus <- function(lam, K,
+                       basemodel=0,
+                       alpha0,
+                       n.obs,
+                       n.samples,
                        agrid,
                        alphamax,
                        TR=T){
-  sample.a <- draw.a(lam=lam, K=K, 
+  sample.a <- draw.a(lam=lam, K=K,
                      basemodel = basemodel,
                      alpha0=alpha0,
-                     n.samples=n.samples, 
+                     n.samples=n.samples,
                      agrid=agrid,
                      alphamax = alphamax,
                      TR=TR)
@@ -119,8 +144,8 @@ draw.Kplus <- function(lam, K,
 
 
 # sample from the implied distribution of K+
-draw.Kplus.given.a <- function(a.eval, K, 
-                               n.obs, n.samples, 
+draw.Kplus.given.a <- function(a.eval, K,
+                               n.obs, n.samples,
                                agrid){
   sample.a <- a.eval
   sample.w <- t(sapply(sample.a, function(x) rdirichlet(1, rep(x, K))))
@@ -139,18 +164,18 @@ draw.Kplus.given.a <- function(a.eval, K,
 }
 
 # BUILD splinefun pc prior density for a \in (0,1]
-pcprior.a <- function(lam=1, 
-                      K=5, 
-                      alpha0, 
+pcprior.a <- function(lam=1,
+                      K=5,
+                      alpha0,
                       agrid,
                       alphamax,
                       TR=T){
-  
+
   # agrid is a sequence of values for which kullback-Leibler distance will be evaluated
   # evaluate the kullback-Leibler distance
   kld_val <- sapply(agrid, function(x) kld(rep(x,K),rep(alpha0,K)))
-  
-  
+
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   if(TR){
     dmax <- sqrt(2*kld(rep(alphamax,K),rep(alpha0,K)))
@@ -158,20 +183,20 @@ pcprior.a <- function(lam=1,
   } else {
     fexp <- function(lambda, d) (lambda * exp(-lambda * d))
   }
-  
+
   # This produces a spline representation of function KLD(a) a < 1
   a.to.kld <- splinefun(agrid, sqrt(2*kld_val))
-  
+
   # This produces a spline representation of the density of "alpha"
   pcprior <- splinefun(agrid, fexp(lambda = lam, d=a.to.kld(agrid)) * abs(a.to.kld(agrid, deriv=1)))
 
   return(pcprior)
-  
+
 }
 
 # EVALUATE pc prior density for a \in (0,1]
-pcprior.a2 <- function(a.eval, lam=1, K=5, 
-                       alpha0, 
+pcprior.a2 <- function(a.eval, lam=1, K=5,
+                       alpha0,
                        agrid,
                        alphamax,
                        TR=T){
@@ -201,8 +226,8 @@ pcprior.a2 <- function(a.eval, lam=1, K=5,
 }
 
 # This produces the density of the induced prior on "log(alpha)"
-pcprior.log_a <- function(log_a.eval, lam, K=5, 
-                          alpha0, 
+pcprior.log_a <- function(log_a.eval, lam, K=5,
+                          alpha0,
                           agrid,
                           alphamax,
                           TR=T){
@@ -233,12 +258,12 @@ pcprior.log_a <- function(log_a.eval, lam, K=5,
 
 ### old function (manual search)
 # lambda_finder <- function(U, tail.prob, alpha0, agrid, K,
-#                           basemodel=0, 
-#                           n.obs, 
-#                           n.samples, 
-#                           alphamax, 
-#                           truncation, 
-#                           lam_ini=2, 
+#                           basemodel=0,
+#                           n.obs,
+#                           n.samples,
+#                           alphamax,
+#                           truncation,
+#                           lam_ini=2,
 #                           lam_tun=0.01){
 #   #  lam_vec <- seq(0.01, 2, by=0.01)
 #   #  tmp <- numeric()
@@ -252,7 +277,7 @@ pcprior.log_a <- function(log_a.eval, lam, K=5,
 #   #    }
 #   #  }
 #   #  mean(lam_vec[which(abs(tmp-U) == min(abs(tmp - U)))])
-#   
+#
 #   #  bmp <- rdirichlet(1000, rep(alpha0, K))
 #   #  bmKp <- apply(sapply(1:1000, function(x) sample(1:K, n.obs, replace=TRUE, prob=bmp[x,])),
 #   #                2, function(x) length(unique(x)))
@@ -265,24 +290,24 @@ pcprior.log_a <- function(log_a.eval, lam, K=5,
 #   #  }
 #   if(basemodel==1){
 #     lam_tmp <- lam_ini
-#     qq <- quantile(draw.Kplus(lam=lam_tmp, 
-#                               alpha0=alpha0, 
-#                               K=K, 
+#     qq <- quantile(draw.Kplus(lam=lam_tmp,
+#                               alpha0=alpha0,
+#                               K=K,
 #                               basemodel=basemodel,
-#                               n.obs=n.obs, 
+#                               n.obs=n.obs,
 #                               n.samples=n.samples,
-#                               agrid=agrid, 
-#                               alphamax=alphamax, 
+#                               agrid=agrid,
+#                               alphamax=alphamax,
 #                               TR=truncation)$Kplus, tail.prob)
 #     while(abs(qq - U) != 0){
-#       samp <- draw.Kplus(lam=lam_tmp, 
-#                          alpha0=alpha0, 
-#                          K=K, 
+#       samp <- draw.Kplus(lam=lam_tmp,
+#                          alpha0=alpha0,
+#                          K=K,
 #                          basemodel=basemodel,
-#                          n.obs=n.obs, 
+#                          n.obs=n.obs,
 #                          n.samples=n.samples,
-#                          agrid=agrid, 
-#                          alphamax=alphamax, 
+#                          agrid=agrid,
+#                          alphamax=alphamax,
 #                          TR=truncation)$Kplus
 #       qq <- quantile(samp, tail.prob)
 #       if(qq > U){
@@ -294,21 +319,21 @@ pcprior.log_a <- function(log_a.eval, lam, K=5,
 #     }
 #   }
 #   if(basemodel==0){
-#     lam_tmp <- lam_ini 
-#     qq <- quantile(draw.Kplus(lam=lam_tmp, alpha0=alpha0, K=K, 
+#     lam_tmp <- lam_ini
+#     qq <- quantile(draw.Kplus(lam=lam_tmp, alpha0=alpha0, K=K,
 #                               basemodel=basemodel,
-#                               n.obs=n.obs, 
+#                               n.obs=n.obs,
 #                               n.samples=n.samples,
-#                               agrid=agrid, 
-#                               alphamax=alphamax, 
+#                               agrid=agrid,
+#                               alphamax=alphamax,
 #                               TR=truncation)$Kplus, 1-tail.prob)
 #     while(abs(qq - U) != 0){
-#       samp <- draw.Kplus(lam=lam_tmp, alpha0=alpha0, K=K, 
+#       samp <- draw.Kplus(lam=lam_tmp, alpha0=alpha0, K=K,
 #                          basemodel=basemodel,
-#                          n.obs=n.obs, 
+#                          n.obs=n.obs,
 #                          n.samples=n.samples,
-#                          agrid=agrid, 
-#                          alphamax=alphamax, 
+#                          agrid=agrid,
+#                          alphamax=alphamax,
 #                          TR=truncation)$Kplus
 #       qq <- quantile(samp, 1-tail.prob)
 #       if(qq < U){
@@ -338,14 +363,14 @@ locate.next <- function(x, U){
 }
 
 refine.lambda.int <- function(y, x, U, K, basemodel){
-  n <- length(x) 
+  n <- length(x)
   if (basemodel==1){
     # locating U for basemodel=1
     if (all(x>U)) stop("initialize lambda.interval to a SMALLER lower bound")
     if (all(x[2:n] == K)) stop("initialize lambda.interval to a SMALLER upper bound")
     U.previous <- miscPack:::locate.previous(x, U)
-    U.next <- miscPack:::locate.next(x, U)  
-    if(sum(x >=U.previous & x <= U.next)>0) 
+    U.next <- miscPack:::locate.next(x, U)
+    if(sum(x >=U.previous & x <= U.next)>0)
       refined.interval <- range(y[sum(x >=U.previous & x <= U.next)>0])
     else  stop("initialize lambda.interval to a BIGGER upper bound")
   } else {
@@ -355,8 +380,8 @@ refine.lambda.int <- function(y, x, U, K, basemodel){
     if (all(x>U)) stop("initialize lambda.interval using a BIGGER upper bound")
     if (all(x[2:n] == K)) stop("initialize lambda.interval to a BIGGER upper bound")
     U.previous <- miscPack:::locate.previous(x, U)
-    U.next <- miscPack:::locate.next(x, U)  
-    if(sum(x >=U.previous & x <= U.next)>0) 
+    U.next <- miscPack:::locate.next(x, U)
+    if(sum(x >=U.previous & x <= U.next)>0)
       refined.interval <- range(y[sum(x >=U.previous & x <= U.next)>0])
     else  stop("initialize lambda.interval using a BIGGER upper bound")
   }
@@ -393,7 +418,7 @@ cdf.impliedprior.Kplus <- function(U,
                                    K=K,
                                    basemodel,
                                    alpha0=alpha0,
-                                   n.obs=n.obs, 
+                                   n.obs=n.obs,
                                    n.samples=n.samples,
                                    agrid = agrid,
                                    alphamax=alphamax,
@@ -411,16 +436,16 @@ cdf.impliedprior.Kplus <- function(U,
 }
 
 
-lambda_finder <- function(U, tail.prob, 
-                          alpha0, 
-                          agrid, 
+lambda_finder <- function(U, tail.prob,
+                          alpha0,
+                          agrid,
                           K,
-                          basemodel=0, 
-                          n.obs, 
-                          n.samples, 
-                          alphamax, 
+                          basemodel=0,
+                          n.obs,
+                          n.samples,
+                          alphamax,
                           truncation,
-                          lambda.interval = c(0.0001, 0.2), 
+                          lambda.interval = c(0.0001, 0.2),
                           presearch.step=FALSE){
   if(presearch.step){
     # pre-search
@@ -428,40 +453,40 @@ lambda_finder <- function(U, tail.prob,
     ini.lamba.lwr <- lambda.interval[1]
     ini.lamba.upr <- lambda.interval[2]
     lambda.grid <- seq(ini.lamba.lwr,
-                       ini.lamba.upr, 
+                       ini.lamba.upr,
                        (ini.lamba.upr-ini.lamba.lwr)/20)
     quantile.grid <- rep(NA, length(lambda.grid))
     for (i in 1:length(lambda.grid)){
-      sample.Kplus <- miscPack:::draw.Kplus(lam=lambda.grid[i], 
-                                            K, 
+      sample.Kplus <- miscPack:::draw.Kplus(lam=lambda.grid[i],
+                                            K,
                                             basemodel=basemodel,
-                                            alpha0=alpha0, 
-                                            n.obs=n.obs, 
-                                            n.samples=n.samples, 
+                                            alpha0=alpha0,
+                                            n.obs=n.obs,
+                                            n.samples=n.samples,
                                             agrid=agrid,
                                             alphamax=alphamax,
                                             TR=truncation)
-      
+
       if (basemodel==1) {
         quantile.grid[i] <- quantile(sample.Kplus$Kplus, tail.prob)
       } else {
         quantile.grid[i] <- quantile(sample.Kplus$Kplus, 1-tail.prob)
       }
     }
-    
+
     print("Quantiles are: ")
     print(quantile.grid)
-    
+
     lambda.ini.range <- miscPack:::refine.lambda.int(lambda.grid,
-                                                     round(quantile.grid, 0), 
-                                                     U, K, 
+                                                     round(quantile.grid, 0),
+                                                     U, K,
                                                      basemodel = basemodel)
   } else {
     lambda.ini.range <- lambda.interval
   }
-  
-  result <- optimize(f=miscPack:::objective, 
-                     interval=lambda.ini.range,  
+
+  result <- optimize(f=miscPack:::objective,
+                     interval=lambda.ini.range,
                      maximum = FALSE,
                      U=U,
                      K=K,
@@ -478,12 +503,12 @@ lambda_finder <- function(U, tail.prob,
 
 
 ################
-#### select lambda such that Pr(Kplus > U)=0.99 
+#### select lambda such that Pr(Kplus > U)=0.99
 #   OBSOLETE
 ################
 
-# 
-# 
+#
+#
 # lambda_givenU <- function(U,
 #                           tail.prob,
 #                           K,
@@ -512,23 +537,23 @@ lambda_finder <- function(U, tail.prob,
 # EVALUATE pc prior density for a1 \in (0,U]
 # with a2 fixed at alpha2.fixed=1-e5
 
-pcprior.asym.a1 <- function(a.eval, 
-                            lam=1, 
+pcprior.asym.a1 <- function(a.eval,
+                            lam=1,
                             U=5,
-                            K=25, 
+                            K=25,
                             alpha1.base,
                             alpha2.base,
                             alpha2.fixed=alpha2.base,
                             agrid,
                             TR=T){
-  
+
   a <- agrid
   n.agrid <- length(a)
-  # alpha.vec.base <- c(rep(alpha1.base, U-1), 
+  # alpha.vec.base <- c(rep(alpha1.base, U-1),
   #                     rep(alpha2.base, K-U+1))
-  alpha.vec.base <- c(rep(alpha1.base, U), 
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -540,10 +565,10 @@ pcprior.asym.a1 <- function(a.eval,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
-  
+
   # expontential density (PC prior is based on exponential of KL distance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -555,7 +580,7 @@ pcprior.asym.a1 <- function(a.eval,
   }
 
   # This produces a spline representation of the density of "alpha"
-  pcprior <- splinefun(a, fexp(lambda = lam, 
+  pcprior <- splinefun(a, fexp(lambda = lam,
                                    d=a.to.d(a)) * abs(a.to.d(a, deriv=1)))
 
   tmp <- pcprior(a.eval)
@@ -565,23 +590,23 @@ pcprior.asym.a1 <- function(a.eval,
 
 # EVALUATE pc prior density for log(a1) \in (-inf,0]
 # with a2 fixed at alpha2.fixed=1-e5
-pcprior.asym.log_a1 <- function(a.eval, 
-                                lam=1, 
+pcprior.asym.log_a1 <- function(a.eval,
+                                lam=1,
                                 U=5,
-                                K=25, 
+                                K=25,
                                 alpha1.base,
                                 alpha2.base,
                                 alpha2.fixed=alpha2.base,
                                 agrid,
                                 TR=T){
-  
+
   a <- agrid
   n.agrid <- length(a)
-  # alpha.vec.base <- c(rep(alpha1.base, U-1), 
+  # alpha.vec.base <- c(rep(alpha1.base, U-1),
   #                     rep(alpha2.base, K-U+1))
-  alpha.vec.base <- c(rep(alpha1.base, U), 
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -593,10 +618,10 @@ pcprior.asym.log_a1 <- function(a.eval,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
-  
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -606,9 +631,9 @@ pcprior.asym.log_a1 <- function(a.eval,
   } else {
     fexp <- function(lambda, d) (lambda * exp(-lambda * d))
   }
-  
+
   # This produces a spline representation of the density of "alpha"
-  pcprior <- splinefun(a, fexp(lambda = lam, 
+  pcprior <- splinefun(a, fexp(lambda = lam,
                                    d=a.to.d(a)) * abs(a.to.d(a, deriv=1)))
   pcprior.spline <- splinefun(a, pcprior(a))
   pcprior.spline.logscale <- splinefun(log(a), pcprior.spline(a)*a)
@@ -617,7 +642,7 @@ pcprior.asym.log_a1 <- function(a.eval,
 }
 
 
-## find lambda 
+## find lambda
 # (decay rate par for the pcprior on a1 with fixed a2, asymm dir)
 objective.pcprior.asym.a1 <- function(lam,
                                       U,
@@ -657,11 +682,11 @@ cdf.impliedpcprior.asym.a1.Kplus <- function(lam,
                                    TR=TRUE){
   a <- agrid
   n.agrid <- length(a)
-  # alpha.vec.base <- c(rep(alpha1.base, U-1), 
+  # alpha.vec.base <- c(rep(alpha1.base, U-1),
   #                     rep(alpha2.base, K-U+1))
-  alpha.vec.base <- c(rep(alpha1.base, U), 
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -673,11 +698,11 @@ cdf.impliedpcprior.asym.a1.Kplus <- function(lam,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
   d.to.a <- splinefun(d_val, a)
-  
+
   # exponential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -690,7 +715,7 @@ cdf.impliedpcprior.asym.a1.Kplus <- function(lam,
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     a.eval <- sample.a[i]
-    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U),
                                     rep(alpha2.fixed, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -719,8 +744,8 @@ lambda_finder_pcprior.asym.a1 <- function(lam,
                                           n.samples,
                                           TR=TRUE,
                                           lambda.interval, ...){
-  result <- optimize(f=miscPack:::objective.pcprior.asym.a1, 
-                     interval=lambda.interval,  
+  result <- optimize(f=miscPack:::objective.pcprior.asym.a1,
+                     interval=lambda.interval,
                      maximum = FALSE,
                      U = U,
                      U.lwr = U.lwr,
@@ -750,11 +775,11 @@ impliedpcprior.asym.a1.Kplus <- function(lam,
                                        TR=TRUE){
   a <- agrid
   n.agrid <- length(a)
-  # alpha.vec.base <- c(rep(alpha1.base, U-1), 
+  # alpha.vec.base <- c(rep(alpha1.base, U-1),
   #                     rep(alpha2.base, K-U+1))
-  alpha.vec.base <- c(rep(alpha1.base, U), 
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -766,11 +791,11 @@ impliedpcprior.asym.a1.Kplus <- function(lam,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
   d.to.a <- splinefun(d_val, a)
-  
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -783,7 +808,7 @@ impliedpcprior.asym.a1.Kplus <- function(lam,
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     a.eval <- sample.a[i]
-    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U),
                                     rep(alpha2.fixed, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -806,21 +831,21 @@ impliedpcprior.asym.a1.Kplus <- function(lam,
 # EVALUATE pc prior density for a2 \in (0,1]
 # with a1 fixed at alpha1.fixed=1
 
-pcprior.asym.a2 <- function(a.eval, 
-                            lam=1, 
+pcprior.asym.a2 <- function(a.eval,
+                            lam=1,
                             U=5,
-                            K=25, 
+                            K=25,
                             alpha1.base,
                             alpha2.base,
                             alpha1.fixed=alpha1.base,
                             agrid,
                             TR=T){
-  
+
   a <- agrid
   n.agrid <- length(a)
-  alpha.vec.base <- c(rep(alpha1.base, U),  
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -831,10 +856,10 @@ pcprior.asym.a2 <- function(a.eval,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
-  
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -844,11 +869,11 @@ pcprior.asym.a2 <- function(a.eval,
   } else {
     fexp <- function(lambda, d) (lambda * exp(-lambda * d))
   }
-  
+
   # This produces a spline representation of the density of "alpha"
-  pcprior <- splinefun(agrid, fexp(lambda = lam, 
+  pcprior <- splinefun(agrid, fexp(lambda = lam,
                                    d=a.to.d(agrid)) * abs(a.to.d(agrid, deriv=1)))
-  
+
   tmp <- pcprior(a.eval)
   return(ifelse(tmp < 0, 0, tmp))
 }
@@ -856,21 +881,21 @@ pcprior.asym.a2 <- function(a.eval,
 
 # EVALUATE pc prior density for log(a2) \in (-inf,0]
 # with a1 fixed at alpha1.fixed=1
-pcprior.asym.log_a2 <- function(a.eval, 
-                                lam=1, 
+pcprior.asym.log_a2 <- function(a.eval,
+                                lam=1,
                                 U=5,
-                                K=25, 
+                                K=25,
                                 alpha1.base,
                                 alpha2.base,
                                 alpha1.fixed=alpha1.base,
                                 agrid,
                                 TR=T){
-  
+
   a <- agrid
   n.agrid <- length(a)
-  alpha.vec.base <- c(rep(alpha1.base, U),  
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -881,10 +906,10 @@ pcprior.asym.log_a2 <- function(a.eval,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
-  
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -894,9 +919,9 @@ pcprior.asym.log_a2 <- function(a.eval,
   } else {
     fexp <- function(lambda, d) (lambda * exp(-lambda * d))
   }
-  
+
   # This produces a spline representation of the density of "alpha"
-  pcprior <- splinefun(a, fexp(lambda = lam, 
+  pcprior <- splinefun(a, fexp(lambda = lam,
                                d=a.to.d(a)) * abs(a.to.d(a, deriv=1)))
   pcprior.spline <- splinefun(a, pcprior(a))
   pcprior.spline.logscale <- splinefun(log(a), pcprior.spline(a)*a)
@@ -905,7 +930,7 @@ pcprior.asym.log_a2 <- function(a.eval,
 }
 
 
-## find lambda 
+## find lambda
 # (decay rate par for the pcprior on a1 with fixed a2, asymm dir)
 objective.pcprior.asym.a2 <- function(lam,
                                       U,
@@ -945,9 +970,9 @@ cdf.impliedpcprior.asym.a2.Kplus <- function(lam,
                                            TR=TRUE){
   a <- agrid
   n.agrid <- length(a)
-  alpha.vec.base <- c(rep(alpha1.base, U),  
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -958,11 +983,11 @@ cdf.impliedpcprior.asym.a2.Kplus <- function(lam,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
   d.to.a <- splinefun(d_val, a)
-  
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -975,7 +1000,7 @@ cdf.impliedpcprior.asym.a2.Kplus <- function(lam,
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     a.eval <- sample.a[i]
-    sample.w[i,] <- rdirichlet(1, c(rep(alpha1.fixed, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(alpha1.fixed, U),
                                     rep(a.eval, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -1003,10 +1028,10 @@ lambda_finder_pcprior.asym.a2 <- function(lam,
                                           n.obs,
                                           n.samples,
                                           TR=TRUE,
-                                          lambda.interval, 
+                                          lambda.interval,
                                           ...){
-  result <- optimize(f=miscPack:::objective.pcprior.asym.a2, 
-                     interval=lambda.interval,  
+  result <- optimize(f=miscPack:::objective.pcprior.asym.a2,
+                     interval=lambda.interval,
                      maximum = FALSE,
                      U = U,
                      U.upr = U.upr,
@@ -1036,9 +1061,9 @@ impliedpcprior.asym.a2.Kplus <- function(lam,
                                        TR=TRUE){
   a <- agrid
   n.agrid <- length(a)
-  alpha.vec.base <- c(rep(alpha1.base, U),  
+  alpha.vec.base <- c(rep(alpha1.base, U),
                       rep(alpha2.base, K-U))
-  
+
   # agrid: seq values for which kullback-Leibler distance will be evaluated
   kld_val <- d_val <- rep(NA, n.agrid)
   for(i in 1:n.agrid){
@@ -1049,11 +1074,11 @@ impliedpcprior.asym.a2.Kplus <- function(lam,
       lgamma(sum(alpha0)) - sum(lgamma(alpha0)))
     c2 <- sum((alpha - alpha0)*(digamma(alpha) - digamma(sum(alpha))))
     kld_val[i] <- c1 + c2
-    d_val[i] <- sqrt(2*kld_val[i]) 
-  }  
+    d_val[i] <- sqrt(2*kld_val[i])
+  }
   a.to.d <- splinefun(a, d_val)
   d.to.a <- splinefun(d_val, a)
-  
+
   # expontential density (PC prior is based on exponential of KL dist(ance)
   ## compute the pc prior on a1 (not available in closed form)
   b.texp <- max(d_val)
@@ -1066,7 +1091,7 @@ impliedpcprior.asym.a2.Kplus <- function(lam,
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     a.eval <- sample.a[i]
-    sample.w[i,] <- rdirichlet(1, c(rep(alpha1.fixed, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(alpha1.fixed, U),
                                     rep(a.eval, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -1086,9 +1111,9 @@ impliedpcprior.asym.a2.Kplus <- function(lam,
 
 
 
-#### find a1~Gamma(a,a) parameter, 
-# we want this centred at a1=1; 
-# find 'a' such that Pr(Kplus<=U.lwr) = b, 
+#### find a1~Gamma(a,a) parameter,
+# we want this centred at a1=1;
+# find 'a' such that Pr(Kplus<=U.lwr) = b,
 # with b small, e.g. 10% or 20%
 
 objective.gammaprior.asym.a1 <- function(gamma.par,
@@ -1098,7 +1123,7 @@ objective.gammaprior.asym.a1 <- function(gamma.par,
                                          K,
                                          alpha2.fixed=1e-5,
                                          n.obs,
-                                         n.samples, 
+                                         n.samples,
                                          sc){
   (miscPack:::cdf.implied.gammaprior.asym.a1.Kplus(gamma.par,
                                                    U = U,
@@ -1106,7 +1131,7 @@ objective.gammaprior.asym.a1 <- function(gamma.par,
                                                    K = K,
                                                    alpha2.fixed=alpha2.fixed,
                                                    n.obs=n.obs,
-                                                   n.samples=n.samples, 
+                                                   n.samples=n.samples,
                                                    sc=sc) - tail.prob)^2
 }
 
@@ -1116,16 +1141,16 @@ cdf.implied.gammaprior.asym.a1.Kplus <- function(gamma.par,
                                                  K,
                                                  alpha2.fixed=1e-5,
                                                  n.obs,
-                                                 n.samples, 
+                                                 n.samples,
                                                  sc){
-  
-  sample.a <- rgamma(n.samples, 
-                     shape = gamma.par, 
+
+  sample.a <- rgamma(n.samples,
+                     shape = gamma.par,
                      rate = gamma.par*sc)
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     a.eval <- sample.a[i]
-    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U),
                                     rep(alpha2.fixed, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -1153,8 +1178,8 @@ gammapar_finder_gammaprior.asym.a1 <- function(gamma.par,
                                                sc,
                                                gamma.par.interval,
                                                ...){
-  result <- optimize(f=miscPack:::objective.gammaprior.asym.a1, 
-                     interval=gamma.par.interval,  
+  result <- optimize(f=miscPack:::objective.gammaprior.asym.a1,
+                     interval=gamma.par.interval,
                      maximum = FALSE,
                      U = U,
                      U.lwr = U.lwr,
@@ -1162,8 +1187,8 @@ gammapar_finder_gammaprior.asym.a1 <- function(gamma.par,
                      K = K,
                      alpha2.fixed=alpha2.fixed,
                      n.obs=n.obs,
-                     n.samples=n.samples, 
-                     sc= sc, 
+                     n.samples=n.samples,
+                     sc= sc,
                      ...)
   result$minimum
 }
@@ -1175,16 +1200,16 @@ implied.gammaprior.asym.a1.Kplus <- function(gamma.par,
                                              K,
                                              alpha2.fixed=1e-5,
                                              n.obs,
-                                             n.samples, 
+                                             n.samples,
                                              sc){
-  
-  sample.a <- rgamma(n.samples, 
-                     shape = gamma.par, 
+
+  sample.a <- rgamma(n.samples,
+                     shape = gamma.par,
                      rate = gamma.par*sc)
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     a.eval <- sample.a[i]
-    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(a.eval, U),
                                     rep(alpha2.fixed, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -1211,10 +1236,10 @@ implied.static.asym.Kplus <- function(U,
                                       alpha2.fixed=1e-5,
                                       n.obs,
                                       n.samples){
-  
+
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
-    sample.w[i,] <- rdirichlet(1, c(rep(alpha1.fixed, U), 
+    sample.w[i,] <- rdirichlet(1, c(rep(alpha1.fixed, U),
                                     rep(alpha2.fixed, K-U)))
     if(is.na(sample.w[i,1])){
       sample.z[i,] <- c(1, rep(0, K-1))
@@ -1237,7 +1262,7 @@ implied.static.sym.Kplus <- function(K,
                                      alpha.fixed=1e-5,
                                      n.obs,
                                      n.samples){
-  
+
   sample.z <- sample.w <- array(NA, c(n.samples, K))
   for(i in 1:n.samples){
     sample.w[i,] <- rdirichlet(1, c(rep(alpha.fixed, K)))
