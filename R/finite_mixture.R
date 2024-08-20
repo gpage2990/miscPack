@@ -266,8 +266,8 @@ pspline_mixture <- function(y, t, ids, K,
                             update_alpha1=TRUE,
                             update_alpha2=FALSE,
                             tail.prob=0.9,
-                            ndx = 10, q = 3, ndens_y = 1,
-                            A=1, Akap=1,
+                            ndx = 10, q = 3, rwd = 1,
+                            ndens_y = 1, A=1, Akap=1,
                             U_tau=1, a_tau=0.1,
                             U_omega=1, a_omega=0.1,
                             a_gam=1, b_gam = 1,
@@ -308,11 +308,16 @@ pspline_mixture <- function(y, t, ids, K,
   G <- bbase(tt, ndx = ndx, bdeg = q)
 
   # Smoothing matrix
-  D <- diff(diag(ncol(G)), differences = 1)
+  D <- diff(diag(ncol(G)), differences = rwd)
   S <- crossprod(D)
-#  S[1,1] <- 2 # to make invertible
-  S <- S + 0.01*diag(ncol(S))
-#  print(solve(S))
+  # print(S)
+  gm <- exp(mean(log(diag(ginv(S)))))
+  S.scale <- gm*S
+  # print(S.scale)
+  # print(exp(mean(log(diag(ginv(S.scale)))))); this should be 1 if scaled right
+  #  S[1,1] <- 2 # to make invertible
+  S <- S.scale + 5e-3*diag(ncol(S))
+  # print(solve(S))
   nb <- ncol(S)
 
   Xmat <- G
