@@ -5,6 +5,7 @@ export(ppmx.missing)
 export(dp_mixture)
 export(informed_mixture)
 export(pspline_mixture)
+export(varpar_curve_ppmx)
 
 
 importFrom("stats", "sd")
