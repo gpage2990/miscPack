@@ -107,7 +107,7 @@
 void varpar_curvecluster(int *draws, int *burn, int *thin, //3
                         int *nsubject, int *nobs, //2
                         double *y, double *z, //2
-                        double *K, int *dimK, //2
+                        double *K, int *dimK, double *Kinv, //3
                         int *ncon, int *ncat, int *Cvec, //3
                         double *Xcon, int *Xcat, //2
                         int *PPM, double *M, //2
@@ -142,7 +142,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   int csobs = 0, csobs2=0, csHobs=0, csobs_pred=0, csHobs_pred=0;
   int nb= (*dimK), N, N_pred=0;
 
-  int nout = (*draws - *burn)/(*thin);
+  int nout = ((*draws - *burn - 1) / *thin) + 1;
 
   Rprintf("nsubject = %d\n", *nsubject);
   Rprintf("nb = %d\n", nb);
@@ -176,13 +176,13 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   // RprintVecAsMat("y", y, 1, N);
   // RprintVecAsMat("sumy", sumy, 1, *nsubject);
 
-  int max_C;
-  max_C = Cvec[0];
-  for(p = 0; p < (*ncat); p++){
-    if(max_C < Cvec[p]) max_C = Cvec[p];
+  int max_C = 1;
+  if(*ncat > 0){
+    max_C = Cvec[0];
+    for(p = 1; p < *ncat; p++){
+      if(max_C < Cvec[p])max_C = Cvec[p];
+    }
   }
-
-  if(*ncat == 0) max_C = 1.0;
 
 //  Rprintf("max_C = %d\n", max_C);
 
@@ -249,9 +249,9 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   double *sig2_iter = R_VectorInit(*nsubject, ((modelPriors[0]-0.0)/2.0)*((modelPriors[0]-0.0)/2.0));
   double *mu_iter = R_VectorInit(nb, 0.0);
 
-  double tau2int_iter = 1.0; 
-  double tau2slope_iter=1.0; 
- 
+  double tau2int_iter = 1.0;
+  double tau2slope_iter=1.0;
+
   double mu0_iter = 0.0;
   double mu1_iter = 0.0;
 
@@ -280,14 +280,19 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   //
   // ===================================================================================
 
+  GetRNGstate();
+
+
   // Initialize Si according to covariates
   for(j = 0; j < *nsubject; j++){
     //		Si_iter[j] = x[j]*(*ncat2) + x2[j]+1;
     //Si_iter[j] = 1;
     //Si_iter[j] = j+1;
-    Si_iter[j] = rbinom(3,0.4)+1;
+    Si_iter[j] = 1;
     nh[j] = 0;
   }
+  // Guarantee that occupied labels begin with 1.
+  Si_iter[0] = 1;
   // Initial enumeration of number of players per cluster;
   for(j = 0; j < *nsubject; j++){
     nh[Si_iter[j]-1] = nh[Si_iter[j]-1]+1;
@@ -315,13 +320,16 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
 
   // stuff that I need to update Si (cluster labels);
-  int iaux=1, auxint;
+  int iaux=1, auxint, was_singleton, old_cluster_index;
   int nhctmp[max_C];
   double auxreal, uu, sumxtmp, sumx2tmp, xcontmp;
   double sumsq, maxph, denph, cprobh;
   double lamintdraw, tau2curvedraw, lamslopedraw, lamcurvedraw;
+  double old_lamint, old_lamslope, old_lamcurve, old_tau2curve;
 
   double *thetadraw = R_VectorInit(nb, 0.0);
+  double *old_theta = R_VectorInit(nb, 0.0);
+
 
   double *ph = R_VectorInit(*nsubject+1, 0.0);
   double *probh = R_VectorInit(*nsubject+1, 0.0);
@@ -337,6 +345,18 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   double *sumx = R_VectorInit((*nsubject)*(*ncon),0.0);
   double *sumx2 = R_VectorInit((*nsubject)*(*ncon),0.0);
   int  nhc[(*nsubject)*(*ncat)*max_C];
+
+
+  int stay_index, selected_index;
+  int moves_this_sweep, singleton_updates_this_sweep;
+  int births_this_sweep, deaths_this_sweep, existing_switches_this_sweep;
+  int gap_count_this_sweep, newprob_count_this_sweep;
+
+  double secondph, log_weight_gap, allocation_entropy;
+  double expected_moves_this_sweep, smallest_pstay_this_sweep;
+  double sum_entropy_this_sweep, sum_gap_this_sweep, max_gap_this_sweep;
+  double sum_pnew_this_sweep, max_pnew_this_sweep;
+
 
   // stuff I need to update sig2 (player specific), mub0, sig2b0;
   double astar, bstar, os, ns, sumb0, suma0;
@@ -359,10 +379,10 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
   // Create the inverse of the K penalty matrix
   double ld;
-  double *Kinv = R_Vector((nb-2)*(nb-2));
-  for(b = 0; b < (nb-2); b++){for(bb = 0; bb < (nb-2); bb++){Kinv[b*(nb-2)+bb] = K[b*(nb-2)+bb];}}
-  cholesky(Kinv, nb-2, &ld);
-  inverse_from_cholesky(Kinv, scr1, scr2, nb-2);
+//  double *Kinv = R_Vector((nb-2)*(nb-2));
+//  for(b = 0; b < (nb-2); b++){for(bb = 0; bb < (nb-2); bb++){Kinv[b*(nb-2)+bb] = K[b*(nb-2)+bb];}}
+//  cholesky(Kinv, nb-2, &ld);
+//  inverse_from_cholesky(Kinv, scr1, scr2, nb-2);
 
   //RprintVecAsMat("Kinv",Kinv, nb-2, nb-2);
 
@@ -438,6 +458,50 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   }
 
 
+  /*
+   * Subject-specific sufficient statistics for the beta-collapsed label
+   * update.  These depend only on the supplied data and design matrices, so
+   * compute them once rather than once per MCMC iteration and cluster.
+   */
+  double *HtH_marg = R_VectorInit((*nsubject)*nb*nb, 0.0);
+  double *Hty_marg = R_VectorInit((*nsubject)*nb, 0.0);
+  double *yty_marg = R_VectorInit(*nsubject, 0.0);
+  int data_offset = 0;
+  int design_offset = 0;
+  double hb, hbb, yval;
+
+  for(j = 0; j < *nsubject; j++){
+    for(t = 0; t < nobs[j]; t++){
+      yval = y[data_offset + t];
+      yty_marg[j] = yty_marg[j] + yval*yval;
+
+      for(b = 0; b < nb; b++){
+        if(*balanced == 1){
+          hb = Hmat[t*nb + b];
+        }else{
+          hb = Hmat[design_offset + t*nb + b];
+        }
+
+        Hty_marg[j*nb + b] = Hty_marg[j*nb + b] + hb*yval;
+
+        for(bb = 0; bb < nb; bb++){
+          if(*balanced == 1){
+            hbb = Hmat[t*nb + bb];
+          }else{
+            hbb = Hmat[design_offset + t*nb + bb];
+          }
+
+          HtH_marg[(j*nb + b)*nb + bb] =
+            HtH_marg[(j*nb + b)*nb + bb] + hb*hbb;
+        }
+      }
+    }
+
+    data_offset = data_offset + nobs[j];
+    if(*balanced != 1){
+      design_offset = design_offset + nobs[j]*nb;
+    }
+  }
 
 
 
@@ -484,7 +548,6 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
   ii = 0;
 
-  GetRNGstate();
 
 
 
@@ -524,9 +587,59 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
     //		RprintIVecAsMat("Si_iter", Si_iter, 1, *nsubject);
     //		Rprintf("nclus_iter = %d\n", nclus_iter);
 
+
+    /*
+     * Allocation-mixing diagnostics for this sweep.  A "move" means that
+     * subject j selects a different partition location.  For a singleton,
+     * selecting the Algorithm 8 auxiliary atom counts as staying because
+     * that auxiliary atom is the subject's saved old cluster atom.
+     */
+    moves_this_sweep = 0;
+    singleton_updates_this_sweep = 0;
+    births_this_sweep = 0;
+    deaths_this_sweep = 0;
+    existing_switches_this_sweep = 0;
+    gap_count_this_sweep = 0;
+    newprob_count_this_sweep = 0;
+
+    expected_moves_this_sweep = 0.0;
+    smallest_pstay_this_sweep = 1.0;
+    sum_entropy_this_sweep = 0.0;
+    sum_gap_this_sweep = 0.0;
+    max_gap_this_sweep = 0.0;
+    sum_pnew_this_sweep = 0.0;
+    max_pnew_this_sweep = 0.0;
+
+
+
     for(j = 0; j < *nsubject; j++){
 
 //      Rprintf("j = %d\n", j);
+
+
+     /*
+      * Determine whether subject j currently forms a singleton.
+      *
+      * If it does, Algorithm 8 with m = 1 requires its existing
+      * cluster atom to become the one auxiliary candidate.
+      *
+      * Save the atom before any cluster swapping or relabeling.
+      */
+      old_cluster_index = Si_iter[j] - 1;
+      was_singleton = (nh[old_cluster_index] == 1);
+
+      if(was_singleton){
+
+        old_lamint    = laminth[old_cluster_index];
+        old_lamslope  = lamslopeh[old_cluster_index];
+        old_lamcurve  = lamcurveh[old_cluster_index];
+        old_tau2curve = tau2curveh[old_cluster_index];
+
+        for(b = 0; b < nb; b++){
+            old_theta[b] =
+                thetah[b*(*nsubject) + old_cluster_index];
+        }
+      }
 
       if(nh[Si_iter[j]-1] > 1){
 
@@ -594,7 +707,11 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
           auxreal = lamcurveh[iaux-1];
           lamcurveh[iaux-1] = lamcurveh[nclus_iter-1];
           lamcurveh[nclus_iter-1] = auxreal;
-          
+
+          auxreal = tau2curveh[iaux-1];
+          tau2curveh[iaux-1] = tau2curveh[nclus_iter-1];
+          tau2curveh[nclus_iter-1] = auxreal;
+
           for(b = 0; b < nb; b++){
 
             auxreal = thetah[b*(*nsubject) + iaux-1];
@@ -704,7 +821,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
         }
 
 
-        ldo = 2.0*(log(laminth[k]) + log(lamslopeh[k]) + (nb-2)*log(lamcurveh[k]));
+        ldo = (log(laminth[k]) + log(lamslopeh[k]) + (nb-2)*log(lamcurveh[k]));
 
         lgconY = 0.0;
         lgconN = 0.0;
@@ -833,8 +950,8 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
                 if(nhctmp[c]==0){
                   lgcatt = lgcatt + 0;
                 }else{
-                  lgcatt = lgcatt + -((double) nhctmp[c]/(double) nh[k]+1)*
-                                      (log((double) nhctmp[c]/(double) nh[k]+1)/log(2));
+                  lgcatt = lgcatt + -((double) nhctmp[c]/((double) nh[k]+1))*
+                                      (log((double) nhctmp[c]/((double) nh[k]+1))/log(2));
                 }
               }
               lgcatY = lgcatY + -(alpha)*lgcatt;
@@ -860,7 +977,22 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 //        Rprintf("nh[k] = %d\n", nh[k]);
 //        Rprintf("dmvnorm(btmp, thtmp, oV, nb, ldo, scr1, 1) = %f\n", dmvnorm(btmp, thtmp, oV, nb, ldo, scr1, 1));
 
-          ph[k] = dmvnorm(btmp, thtmp, oV, nb, ldo, scr1, 1) +
+          // ph[k] = dmvnorm(btmp, thtmp, oV, nb, ldo, scr1, 1) +
+          ph[k] = log_marginal_y_collapsed_beta(
+                    HtH_marg + j*nb*nb,
+                    Hty_marg + j*nb,
+                    yty_marg[j],
+                    nobs[j],
+                    sig2_iter[j],
+                    thtmp,
+                    laminth[k],
+                    lamslopeh[k],
+                    lamcurveh[k],
+                    nb,
+                    Sstar,
+                    Mstar,
+                    scr1,
+                    scr2) +
           log((double) nh[k]) + // Scale parameter from DP
           lgcatY - lgcatN +  // Categorical part only nonzero if PPMx=TRUE
           lgconY - lgconN;   // Continuous part only nonzero if PPMx=TRUE
@@ -868,37 +1000,73 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
       }
 
 
-      // Need to consider allocating subject to new cluster
-      lamintdraw = runif(0, Aint);
-      lamslopedraw = runif(0, Aslope);
-      lamcurvedraw = runif(0, Acurve);
-      tau2curvedraw = 1/rgamma(ac, bc);
-      
+      /*
+       * Construct the one auxiliary candidate used by Algorithm 8.
+       *
+       * m = 1:
+       *
+       *   - If j was a singleton, the auxiliary atom is its old atom.
+       *     No new atom is drawn from G0.
+       *
+       *   - If j was not a singleton, draw one new atom from G0.
+       */
+      if(was_singleton){
+
+          /*
+           * Drag the singleton's old atom along as the auxiliary
+           * candidate.
+           */
+          lamintdraw     = old_lamint;
+          lamslopedraw   = old_lamslope;
+          lamcurvedraw   = old_lamcurve;
+          tau2curvedraw  = old_tau2curve;
+
+          for(b = 0; b < nb; b++){
+              thetadraw[b] = old_theta[b];
+          }
+
+      }else{
+
+        // Need to consider allocating subject to new cluster
+        lamintdraw = runif(0, Aint);
+        lamslopedraw = runif(0, Aslope);
+        lamcurvedraw = runif(0, Acurve);
+        tau2curvedraw = 1/rgamma(ac, bc);
+
+        for(b = 0; b < nb; b++){
+          for(bb = 0; bb < nb; bb++){
+            nV[b*nb + bb] = 0.0;
+            if(b > 1 & bb > 1){
+              nV[b*nb + bb] = tau2curvedraw*Kinv[(b-2)*(nb-2) + (bb-2)];
+            }
+          }
+        }
+
+        nV[0*nb + 0] = tau2int_iter;
+        nV[1*nb + 1] = tau2slope_iter;
+
+        cholesky(nV, nb , &ld);
+        ran_mvnorm(mu_iter, nV, nb, scr1, thetadraw);
+
+      }
+
+
       for(b = 0; b < nb; b++){
         for(bb = 0; bb < nb; bb++){
-          oV[b*nb+bb] = 0.0;
-          nV[b*nb+bb] = 0.0;
-          if(b == 0 & bb == 0){
-            oV[b*nb+bb] = 1/(lamintdraw);
-            nV[b*nb+bb] = tau2int_iter;
-          }
-          if(b == 1 & bb == 1){
-            oV[b*nb+bb] = 1/(lamslopedraw);
-            nV[b*nb+bb] = tau2slope_iter;
-          }
-          if(b == bb & b > 1){
-            oV[b*nb+bb] = 1/(lamcurvedraw);
-            nV[b*nb+bb] = tau2curvedraw*Kinv[b*nb+bb];
+          oV[b*nb + bb] = 0.0;
+          if(b > 1 & bb > 1){
+            oV[b*nb + b] = 1.0/lamcurvedraw;
           }
         }
       }
 
 
-      cholesky(nV, nb , &ld);
 
-      ran_mvnorm(mu_iter, nV, nb, scr1, thetadraw);
+      oV[0*nb + 0] = 1.0/lamintdraw;
+      oV[1*nb + 1] = 1.0/lamslopedraw;
 
-      ldo = 2.0*(log(lamintdraw) + log(lamslopedraw) + (nb-2)*log(lamcurvedraw));
+
+      ldo = (log(lamintdraw) + log(lamslopedraw) + (nb-2)*log(lamcurvedraw));
 
 //      RprintVecAsMat("thetadraw", thetadraw, 1, nb);
 
@@ -959,15 +1127,51 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
       }
 
 
-      ph[nclus_iter] = dmvnorm(btmp,thetadraw,oV,nb,ldo,scr1,1) +
-                           log(Mdp) +
-                           lgcondraw +
-                           lgcatdraw;
+//      ph[nclus_iter] = dmvnorm(btmp,thetadraw,oV,nb,ldo,scr1,1) +
+      ph[nclus_iter] = log_marginal_y_collapsed_beta(
+                           HtH_marg + j*nb*nb,
+                           Hty_marg + j*nb,
+                           yty_marg[j],
+                           nobs[j],
+                           sig2_iter[j],
+                           thetadraw,
+                           lamintdraw,
+                           lamslopedraw,
+                           lamcurvedraw,
+                           nb,
+                           Sstar,
+                           Mstar,
+                           scr1,
+                           scr2) +
+                        log(Mdp) +
+                        lgcondraw +
+                        lgcatdraw;
 
 
 
 //      RprintVecAsMat("ph", ph, 1, nclus_iter+1);
 
+      /* Find the two largest unnormalized log weights. */
+      maxph = R_NegInf;
+      secondph = R_NegInf;
+      for(k = 0; k < nclus_iter+1; k++){
+        if(ph[k] >= maxph){
+          secondph = maxph;
+          maxph = ph[k];
+        }else if(ph[k] > secondph){
+          secondph = ph[k];
+        }
+      }
+
+      /* A large gap indicates an effectively deterministic allocation. */
+      if(nclus_iter+1 > 1){
+        log_weight_gap = maxph - secondph;
+        sum_gap_this_sweep = sum_gap_this_sweep + log_weight_gap;
+        if(log_weight_gap > max_gap_this_sweep){
+          max_gap_this_sweep = log_weight_gap;
+        }
+        gap_count_this_sweep = gap_count_this_sweep + 1;
+      }
 
 
 
@@ -990,6 +1194,40 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
 //      RprintVecAsMat("probh = ", probh, 1, nclus_iter+1);
 
+
+      /*
+       * Identify the candidate corresponding to no partition change.
+       * For a singleton this is the saved old atom in the auxiliary slot;
+       * otherwise it is the still-occupied old cluster.
+       */
+      if(was_singleton){
+        stay_index = nclus_iter;
+        singleton_updates_this_sweep = singleton_updates_this_sweep + 1;
+      }else{
+        stay_index = old_cluster_index;
+        sum_pnew_this_sweep = sum_pnew_this_sweep + probh[nclus_iter];
+        if(probh[nclus_iter] > max_pnew_this_sweep){
+          max_pnew_this_sweep = probh[nclus_iter];
+        }
+        newprob_count_this_sweep = newprob_count_this_sweep + 1;
+      }
+
+      expected_moves_this_sweep = expected_moves_this_sweep +
+                                  (1.0 - probh[stay_index]);
+      if(probh[stay_index] < smallest_pstay_this_sweep){
+        smallest_pstay_this_sweep = probh[stay_index];
+      }
+
+      allocation_entropy = 0.0;
+      for(k = 0; k < nclus_iter+1; k++){
+        if(probh[k] > 0.0){
+          allocation_entropy = allocation_entropy -
+                               probh[k]*log(probh[k]);
+        }
+      }
+      sum_entropy_this_sweep = sum_entropy_this_sweep + allocation_entropy;
+
+
       uu = runif(0.0,1.0);
 
       cprobh= 0.0;;
@@ -1001,6 +1239,25 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
           break;
         }
       }
+
+
+      /* Count the realized transition before nclus_iter is modified. */
+      selected_index = iaux - 1;
+      if(selected_index != stay_index){
+        moves_this_sweep = moves_this_sweep + 1;
+
+        if(was_singleton){
+          /* The old singleton disappears into an occupied cluster. */
+          deaths_this_sweep = deaths_this_sweep + 1;
+        }else if(selected_index == nclus_iter){
+          /* A member of a nonsingleton cluster creates a new cluster. */
+          births_this_sweep = births_this_sweep + 1;
+        }else{
+          /* Direct movement between two already occupied clusters. */
+          existing_switches_this_sweep = existing_switches_this_sweep + 1;
+        }
+      }
+
 
 
       if(iaux <= nclus_iter){
@@ -1017,6 +1274,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
         laminth[Si_iter[j]-1] = lamintdraw;
         lamslopeh[Si_iter[j]-1] = lamslopedraw;
         lamcurveh[Si_iter[j]-1] = lamcurvedraw;
+        tau2curveh[Si_iter[j]-1] = tau2curvedraw;
 
         for(b = 0; b < nb; b++){
           thetah[b*(*nsubject) + Si_iter[j]-1] = thetadraw[b];
@@ -1043,11 +1301,39 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 //      Rprintf("nclus = %d\n", nclus_iter);
 //      RprintVecAsMat("sumx", sumx, *ncon, nclus_iter);
 
-
     }
 
 
-
+    /*
+     * Print one compact diagnostic record every 100 sweeps.  expected_moves
+     * is the sum of 1-p(stay) and can be compared directly with moves.
+     */
+    /* 
+    if((i+1) % 100 == 0){
+      Rprintf(
+        "mix iter=%d K=%d moves=%d expected=%.4f singletons=%d "
+        "births=%d deaths=%d existing_switches=%d min_pstay=%.6g "
+        "mean_pnew=%.6g max_pnew=%.6g mean_entropy=%.6g "
+        "mean_loggap=%.6g max_loggap=%.6g\n",
+        i+1,
+        nclus_iter,
+        moves_this_sweep,
+        expected_moves_this_sweep,
+        singleton_updates_this_sweep,
+        births_this_sweep,
+        deaths_this_sweep,
+        existing_switches_this_sweep,
+        smallest_pstay_this_sweep,
+        (newprob_count_this_sweep > 0) ?
+          sum_pnew_this_sweep/(double)newprob_count_this_sweep : 0.0,
+        max_pnew_this_sweep,
+        sum_entropy_this_sweep/(double)(*nsubject),
+        (gap_count_this_sweep > 0) ?
+          sum_gap_this_sweep/(double)gap_count_this_sweep : 0.0,
+        max_gap_this_sweep
+      );
+    }
+    */
 
     //////////////////////////////////////////////////////////////////////////////////
     //																				//
@@ -1109,7 +1395,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
       // and the variance for the slope
       Sstar[0*nb+0] = (1/sig2_iter[j])*HtH[0*nb+0] +
                       (1/(laminth[Si_iter[j]-1]));
-                      
+
       Sstar[1*nb+1] = (1/sig2_iter[j])*HtH[1*nb+1] +
                       (1/(lamslopeh[Si_iter[j]-1]));
 
@@ -1124,14 +1410,14 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
 
 //      RprintVecAsMat("H'(y-b0)", scr2, 1, nb);
-      scr3[0] = (1/sig2_iter[j])*Hty[0] +  
+      scr3[0] = (1/sig2_iter[j])*Hty[0] +
                 (1/laminth[Si_iter[j]-1])*thetah[0*(*nsubject) + Si_iter[j]-1];
-                
-      scr3[1] = (1/sig2_iter[j])*Hty[1] +  
+
+      scr3[1] = (1/sig2_iter[j])*Hty[1] +
                 (1/lamslopeh[Si_iter[j]-1])*thetah[1*(*nsubject) + Si_iter[j]-1];
 
       for(b = 2; b < nb; b++){
-        scr3[b] = (1/sig2_iter[j])*Hty[b] +  
+        scr3[b] = (1/sig2_iter[j])*Hty[b] +
                   (1/lamcurveh[Si_iter[j]-1])*thetah[b*(*nsubject) + Si_iter[j]-1];
       }
 
@@ -1181,7 +1467,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 //        RprintVecAsMat("Hb_pred", Hb_pred, 1, nobs[j]+(*npredobs));
 
 
-        if((i >= (*burn)) & (i % (*thin) == 0)){
+        if(i >= *burn && ((i - *burn) % *thin == 0)){
 
           for(jj = 0; jj < nobs[j]+(*npredobs); jj++){
             predlines[ii*(N_pred) + csobs_pred] = rnorm(Hb_pred[jj], sqrt(sig2_iter[j]));
@@ -1251,7 +1537,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
       //									       //
       ///////////////////////////////////////////////
 
-      if((i > (*burn-1)) & (i % (*thin) == 0)){
+      if(i >= *burn && ((i - *burn) % *thin == 0)){
         like0=0;
         llikeval = 0.0;
         for(t = 0; t < nobs[j]; t++){
@@ -1275,7 +1561,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
 
       // store the fitted lines
-      if((i >= (*burn)) & (i % (*thin) == 0)){
+      if(i >= *burn && ((i - *burn) % *thin == 0)){
       }
 
 
@@ -1287,7 +1573,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
     for(k = 0; k < nclus_iter; k++){
       // Rprintf("k = %d =================== \n", k);
-      
+
       // start with sig2_curve
       olam = lamcurveh[k];
       nlam = rnorm(olam,csigCURVE);
@@ -1306,14 +1592,14 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
             if(b == bb){
 
-              oV[b*(nb-2)+bb] = 1/(olam*olam);
-              nV[b*(nb-2)+bb] = 1/(nlam*nlam);
+              oV[b*(nb-2)+bb] = 1/(olam);
+              nV[b*(nb-2)+bb] = 1/(nlam);
             }
           }
         }
 
-        ldo = 2.0*(nb-2)*log(olam);
-        ldn = 2.0*(nb-2)*log(nlam);
+        ldo = (nb-2)*log(olam);
+        ldn = (nb-2)*log(nlam);
 
         lln = 0.0;
         llo = 0.0;
@@ -1342,14 +1628,14 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
         uu = runif(0.0,1.0);
 
         if(log(uu) < llr) lamcurveh[k] = nlam;
-        
+
       }
 
       // Next sig2_int
       olam = laminth[k];
       nlam = rnorm(olam,csigINT);
       if((nlam > 0) & (nlam < Aint)){
-      
+
         thtmp[0] = thetah[0*(*nsubject) + k];
 
         lln = 0.0;
@@ -1360,19 +1646,19 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
             llo = llo + dnorm(beta_iter[0*(*nsubject) + j], thtmp[0], sqrt(olam), 1);
             lln = lln + dnorm(beta_iter[0*(*nsubject) + j], thtmp[0], sqrt(nlam), 1);
-        
+
           }
 
         }
-      
-        llo = llo + dunif(olam, 0.0, Aint, 1); 
-        llo = llo + dunif(nlam, 0.0, Aint, 1); 
-        
+
+        llo = llo + dunif(olam, 0.0, Aint, 1);
+        lln = lln + dunif(nlam, 0.0, Aint, 1);
+
         llr = lln - llo;
         uu = runif(0.0,1.0);
 
         if(log(uu) < llr) laminth[k] = nlam;
-        
+
       }
 
 
@@ -1380,7 +1666,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
       olam = lamslopeh[k];
       nlam = rnorm(olam,csigSLOPE);
       if((nlam > 0) & (nlam < Aslope)){
-      
+
         thtmp[1] = thetah[1*(*nsubject) + k];
 
         lln = 0.0;
@@ -1391,21 +1677,21 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
             llo = llo + dnorm(beta_iter[1*(*nsubject) + j], thtmp[1], sqrt(olam), 1);
             lln = lln + dnorm(beta_iter[1*(*nsubject) + j], thtmp[1], sqrt(nlam), 1);
-        
+
           }
 
         }
-      
-        llo = llo + dunif(olam, 0.0, Aslope, 1); 
-        llo = llo + dunif(nlam, 0.0, Aslope, 1); 
-        
+
+        llo = llo + dunif(olam, 0.0, Aslope, 1);
+        lln = lln + dunif(nlam, 0.0, Aslope, 1);
+
         llr = lln - llo;
         uu = runif(0.0,1.0);
 
         if(log(uu) < llr) lamslopeh[k] = nlam;
-        
+
       }
-        
+
 
     }
 
@@ -1517,11 +1803,11 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
           if(b == 0 & bb == 0) Sstar[b*nb+bb] = nh[k]/laminth[k] + 1/tau2int_iter;
           if(b == 0 & bb != 0) Sstar[b*nb+bb] = 0.0;
           if(b != 0 & bb == 0) Sstar[b*nb+bb] = 0.0;
-          
+
           if(b == 1 & bb == 1) Sstar[b*nb+bb] = nh[k]/lamslopeh[k] + 1/tau2slope_iter;
           if(b == 1 & bb != 1) Sstar[b*nb+bb] = 0.0;
           if(b != 1 & bb == 1) Sstar[b*nb+bb] = 0.0;
-          
+
           if(b > 1 & bb > 1){
             Sstar[b*nb+bb] = (1/tau2curveh[k])*K[(b-2)*(nb-2)+(bb-2)];
 
@@ -1538,9 +1824,9 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
       cholesky(Sstar, nb, &ld);
       inverse_from_cholesky(Sstar, scr1, scr2, nb);
-       
-      // This should be zero as the entries of mu are 
-      // zero for K. 
+
+      // This should be zero as the entries of mu are
+      // zero for K.
       // matrix_product(K, mu_iter, scr1, nb-2, 1, nb-2);
 
       for(j = 0; j < *nsubject; j++){
@@ -1548,7 +1834,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
           for(b = 0; b < nb; b++){
             if(b==0) sumbeta[b] = sumbeta[b] + (1/laminth[k])*beta_iter[b*(*nsubject) + j];
             if(b==1) sumbeta[b] = sumbeta[b] + (1/lamslopeh[k])*beta_iter[b*(*nsubject) + j];
-            if(b>1){            
+            if(b>1){
               sumbeta[b] = sumbeta[b] + (1/lamcurveh[k])*
                                          beta_iter[b*(*nsubject) + j];
             }
@@ -1560,7 +1846,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
         if(b==0) sumbeta[b] = sumbeta[b] + (mu_iter[0]/tau2int_iter);
         if(b==1) sumbeta[b] = sumbeta[b] + (mu_iter[1]/tau2slope_iter);
         if(b>1)  sumbeta[b] = sumbeta[b] + 0.0; // K %*% mu_iter[3:p] = 0
-      } 
+      }
 
       //RprintVecAsMat("sumbeta", sumbeta, 1, nb);
 
@@ -1616,7 +1902,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
     //
     //////////////////////////////////////////////////////////////////////////////////
 
-    if(i > (*burn-1) & i % (*thin) == 0){
+    if(i >= *burn && ((i - *burn) % *thin == 0)){
 
       for(pp = 0; pp < *npred; pp++){
 
@@ -1967,7 +2253,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
           for(b = 0; b < nb; b++){
             for(bb = 0; bb < nb; bb++){
 
-              nV[b*nb+bb] = tau2draw*Kinv[b*nb+bb];
+              nV[b*nb+bb] = tau2draw*Kinv[(b-2)*(nb-2)+(bb-2)];
 
               Sstar[b*nb+bb] = 0.0;
               // THis is the Cholesky Decomposition as needed in ran_mvnorm
@@ -2016,7 +2302,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
     //																			  	                                    //
     //////////////////////////////////////////////////////////////////////////////////
 
-    if((i >= (*burn)) & (i % (*thin) == 0)){
+    if(i >= *burn && ((i - *burn) % *thin == 0)){
 //      Rprintf("i = %d\n", i+1);
 //      Rprintf("ii = %d\n", ii);
 
@@ -2026,7 +2312,6 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
 
       tau2int[ii] = tau2int_iter;
       tau2slope[ii] = tau2slope_iter;
-      tau2curve[ii] = tau2curveh[Si_iter[j]-1];
 
 
       for(b = 0; b < nb; b++){

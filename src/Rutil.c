@@ -10,6 +10,7 @@
  * These programs are provided WITHOUT ANY WARRNTY.
  *
  *************************************************************/
+#include "matrix.h"
 
 #include <R.h>
 #include <Rmath.h>
@@ -539,6 +540,91 @@ double dmvnorm(double* y, double* mu, double* iSig, int dim, double ld, double* 
     out = -(double) dim*M_LN_SQRT_2PI - 0.5*(ld + qf);
     if (logout)	return out;
     return exp(out);
+}
+
+
+
+/*
+ * Log p(y_i | z_i=k, theta_k, Lambda_k, sig2_i) with beta_i integrated out.
+ *
+ *   y_i | beta_i ~ N(H_i beta_i, sig2_i I)
+ *   beta_i | z_i=k ~ N(theta_k, Lambda_k)
+ *
+ * Lambda_k is diagonal with separate intercept, slope, and common curve
+ * variances.  The calculation uses P-dimensional sufficient statistics and
+ * avoids forming the n_i by n_i marginal covariance matrix.
+ */
+double log_marginal_y_collapsed_beta(
+    double *HtH_i,
+    double *Hty_i,
+    double yty_i,
+    int n_i,
+    double sig2_i,
+    double *theta_k,
+    double lamint_k,
+    double lamslope_k,
+    double lamcurve_k,
+    int dim,
+    double *A,
+    double *h,
+    double *work1,
+    double *work2){
+
+  int b, bb;
+  double invvar, theta_quad, hAinvh;
+  double logdetLambda, logdetA, constant_term;
+
+  if(sig2_i <= 0.0 || lamint_k <= 0.0 ||
+     lamslope_k <= 0.0 || lamcurve_k <= 0.0){
+    return R_NegInf;
+  }
+
+  theta_quad = 0.0;
+
+  for(b = 0; b < dim; b++){
+    if(b == 0){
+      invvar = 1.0/lamint_k;
+    }else if(b == 1){
+      invvar = 1.0/lamslope_k;
+    }else{
+      invvar = 1.0/lamcurve_k;
+    }
+
+    h[b] = Hty_i[b]/sig2_i + invvar*theta_k[b];
+    theta_quad = theta_quad + invvar*theta_k[b]*theta_k[b];
+
+    for(bb = 0; bb < dim; bb++){
+      A[b*dim + bb] = HtH_i[b*dim + bb]/sig2_i;
+      if(b == bb){
+        A[b*dim + bb] = A[b*dim + bb] + invvar;
+      }
+    }
+  }
+
+  logdetLambda = log(lamint_k) + log(lamslope_k) +
+                 (dim-2)*log(lamcurve_k);
+
+  /*
+   * cholesky overwrites A with its Cholesky factor.  Compute log|A|
+   * directly from that factor so this calculation does not depend on the
+   * convention used for the routine's ld output argument.
+   */
+  cholesky(A, dim, &logdetA);
+  logdetA = 0.0;
+  for(b = 0; b < dim; b++){
+    if(A[b*dim + b] <= 0.0 || !R_FINITE(A[b*dim + b])){
+      return R_NegInf;
+    }
+    logdetA = logdetA + 2.0*log(A[b*dim + b]);
+  }
+  inverse_from_cholesky(A, work1, work2, dim);
+  hAinvh = quform(h, A, dim);
+
+  constant_term = yty_i/sig2_i + theta_quad - hAinvh;
+
+  return -(double)n_i*M_LN_SQRT_2PI
+         -0.5*((double)n_i*log(sig2_i) +
+               logdetLambda + logdetA + constant_term);
 }
 
 

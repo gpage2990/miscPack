@@ -27,6 +27,9 @@ void ran_dirich(double*, int, double*, double*);
 double rtnorm(double, double, double, double);
 double dsst(double, double, double, double, int);
 double dmvnorm(double*,double*,double*,int,double,double*,int);
+double log_marginal_y_collapsed_beta(double*, double*, double, int, double, double*,
+                                     double, double, double, int, double*, double*,
+                                     double*, double*);
 double dinvwish(double*, double, double, int, int);
 double dinvgamma(double, double, double, int);
 double dN_IG(double, double, double, double, double, double, int);
