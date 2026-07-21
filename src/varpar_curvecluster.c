@@ -287,8 +287,7 @@ void varpar_curvecluster(int *draws, int *burn, int *thin, //3
   for(j = 0; j < *nsubject; j++){
     //		Si_iter[j] = x[j]*(*ncat2) + x2[j]+1;
     //Si_iter[j] = 1;
-    //Si_iter[j] = j+1;
-    Si_iter[j] = 1;
+    Si_iter[j] = j+1;
     nh[j] = 0;
   }
   // Guarantee that occupied labels begin with 1.
